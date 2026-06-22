@@ -1,13 +1,13 @@
 # B站排行榜数据与标题词云
 
-抓取 B站全站排行榜，将榜单整理为中文表头 CSV，并根据视频标题生成词云图。
+抓取B站排行榜，将榜单整理为CSV，并根据视频标题生成词云图。
 
 ## 功能
 
-- 请求 B站全站排行榜接口，记录数量以接口实际返回为准；
-- 按 BV号去重并输出 16 列中文 CSV；
-- 提取中文、ASCII/拉丁扩展、日文假名、韩文和西里尔文字标题片段；
-- 使用 `jieba` 进行中文分词；
+- 请求B站排行榜接口，记录数量以接口实际返回为准；
+- 按BV号去重并输出CSV；
+- 提取标题片段；
+- 使用 `jieba` 进行分词；
 - 使用 `stopwordsiso` 和项目词表过滤停用词；
 - 忽略 Emoji、标点和纯符号标题；
 - 按候选文件名查找 Windows、macOS 和 Linux 字体，也可显式指定字体；
@@ -22,8 +22,8 @@
 │  ├─ cleaner.py         # 去重、分词和停用词过滤
 │  ├─ stopwords.py       # 多语言停用词与保留词策略
 │  ├─ fonts.py           # 跨平台字体查找
-│  ├─ wordcloud.py       # 词云生成
-│  ├─ storage.py         # 中文 CSV 与输出路径
+│  ├─ wordcloud.py       # 词云图生成
+│  ├─ storage.py         # CSV 与输出路径
 │  ├─ cli.py             # 命令行流程
 │  └─ resources/stopwords/
 │     ├─ custom_stopwords.txt
@@ -37,7 +37,7 @@
 ## 环境要求
 
 - Python 3.10 或更高版本
-- 可访问 B站排行榜接口的网络环境
+- 可访问B站排行榜的网络环境
 
 ## 安装
 
@@ -81,7 +81,7 @@ python -m bilibili_ranker --output-dir output
 --minimum-token-length 2       普通词最短长度
 --width 1920                   词云图宽度
 --height 1080                  词云图高度
---max-words 300                词云最大词数
+--max-words 300                词云图最大词数
 --timeout 15                   API 请求超时秒数
 ```
 
@@ -102,13 +102,13 @@ CSV 使用 `utf-8-sig` 编码，可直接使用 Excel 打开。再次运行不�
 | 表头 | 含义 |
 | --- | --- |
 | 排名 | 本次榜单顺序 |
-| BV号 | 视频 BV 标识 |
+| BV号 | 视频BV号 |
 | 视频链接 | B站视频页面链接 |
 | 视频标题 | 视频标题原文 |
 | 视频分区 | 视频所属细分分区 |
 | 主分区 | 视频所属上级分区 |
 | UP主 | 投稿账号名称 |
-| 发布时间（北京时间） | 视频公开时间，格式为 `YYYY-MM-DD HH:MM:SS` |
+| 发布时间（北京时间） | 视频发布时间，格式为 `YYYY-MM-DD HH:MM:SS` |
 | 视频时长（秒） | 视频总时长 |
 | 播放量 | 视频播放次数 |
 | 弹幕数 | 弹幕数量 |
@@ -120,9 +120,9 @@ CSV 使用 `utf-8-sig` 编码，可直接使用 Excel 打开。再次运行不�
 
 ## 标题处理
 
-标题首先进行 Unicode NFKC 和空白归一化。中文片段使用 `jieba` 分词；ASCII/拉丁扩展、日文假名、韩文和西里尔文字仅按连续字符片段提取，不进行日文或韩文形态学分词。未列出的文字系统不会进入词频。
+标题首先进行 Unicode NFKC 和空白归一化。中文使用 `jieba` 分词；其他语言按连续字符片段提取。未列出的文字系统不会进入词频。
 
-默认加载以下 `stopwordsiso` 语言：
+默认加载以下语言：
 
 ```
 zh, en, ja, ko, fr, de, es, ru
@@ -130,7 +130,7 @@ zh, en, ja, ko, fr, de, es, ru
 
 项目停用词位于 `custom_stopwords.txt`，需要保留的短词位于 `allowlist.txt`。保留词优先于基础停用词和项目停用词。
 
-Emoji、标点及其他符号不参与词频统计。标题中只有 Emoji 或符号时，该标题不会向词云提供词元。
+Emoji、标点及其他符号不参与词频统计。标题中只有 Emoji 或符号时，该标题不会向词云图提供词元。
 
 ## 字体
 
@@ -145,10 +145,4 @@ Linux 推荐安装 Noto Sans CJK。仓库不包含专有字体文件。自动查
 
 ## 数据来源
 
-排行榜页面：<https://www.bilibili.com/v/popular/rank/all>
-
-项目使用的接口：
-
-```
-https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all
-```
+排行榜页面：https://www.bilibili.com/v/popular/rank/all
