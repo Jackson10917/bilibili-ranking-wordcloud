@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,6 +8,10 @@ version = "0.1.0"
 description = "抓取 B站全站排行榜并生成多语言词频与词云"
 readme = "README.md"
 requires-python = ">=3.10"
+license = "MIT"
+authors = [
+  { name = "Jackson10917", email = "Jackson10917@users.noreply.github.com" },
+]
 dependencies = [
   "jieba>=0.42,<1",
   "requests>=2.31,<3",
@@ -18,12 +22,18 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "build>=1.2,<2",
   "pytest>=8,<10",
   "ruff>=0.11,<1",
 ]
 
 [project.scripts]
 bilibili-rank = "bilibili_ranker.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Jackson10917/bilibili-ranking-wordcloud"
+Repository = "https://github.com/Jackson10917/bilibili-ranking-wordcloud.git"
+Issues = "https://github.com/Jackson10917/bilibili-ranking-wordcloud/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -37,3 +47,7 @@ bilibili_ranker = [
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

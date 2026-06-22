@@ -29,7 +29,10 @@
 │     ├─ custom_stopwords.txt
 │     ├─ allowlist.txt
 │     └─ README.md
+├─ tests/                  # 核心逻辑自动化测试
+├─ .github/workflows/ci.yml
 ├─ .gitignore
+├─ LICENSE
 ├─ pyproject.toml
 └─ README.md
 ```
@@ -57,6 +60,17 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e .
+```
+
+## 开发与测试
+
+安装开发依赖并运行静态检查、测试和构建：
+
+```
+python -m pip install -e ".[dev]"
+ruff check .
+pytest
+python -m build
 ```
 
 ## 运行
@@ -145,4 +159,14 @@ Linux 推荐安装 Noto Sans CJK。仓库不包含专有字体文件。自动查
 
 ## 数据来源
 
-排行榜页面：https://www.bilibili.com/v/popular/rank/all
+排行榜页面：<https://www.bilibili.com/v/popular/rank/all>
+
+项目使用的公开接口：
+
+```
+https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all
+```
+
+## 许可证
+
+本项目使用 [MIT License](LICENSE)。
