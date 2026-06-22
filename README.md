@@ -29,8 +29,6 @@
 │     ├─ custom_stopwords.txt
 │     ├─ allowlist.txt
 │     └─ README.md
-├─ tests/                  # 核心逻辑自动化测试
-├─ .github/workflows/ci.yml
 ├─ .gitignore
 ├─ LICENSE
 ├─ pyproject.toml
@@ -60,17 +58,6 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e .
-```
-
-## 开发与测试
-
-安装开发依赖并运行静态检查、测试和构建：
-
-```
-python -m pip install -e ".[dev]"
-ruff check .
-pytest
-python -m build
 ```
 
 ## 运行
