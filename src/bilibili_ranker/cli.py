@@ -1,0 +1,120 @@
+"""项目命令行入口。"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any, Sequence
+
+from .cleaner import TitleAnalyzer, deduplicate_records
+from .client import BilibiliAPIError, BilibiliRankingClient
+from .fonts import FontNotFoundError
+from .models import parse_ranking_records_with_issues
+from .stopwords import DEFAULT_LANGUAGES, load_stopword_policy
+from .storage import create_output_bundle, write_records_csv
+from .wordcloud import render_wordcloud
+
+
+def _language_codes(value: str) -> tuple[str, ...]:
+    codes = tuple(dict.fromkeys(part.strip() for part in value.split(",") if part.strip()))
+    if not codes:
+        raise argparse.ArgumentTypeError("语言列表不能为空")
+    return codes
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="bilibili-rank",
+        description="抓取 B站全站排行榜，输出中文 CSV 和词云。",
+    )
+    parser.add_argument("--output-dir", type=Path, default=Path("output"), help="输出目录")
+    parser.add_argument("--font-path", type=Path, help="显式指定 TTF/TTC/OTF 字体")
+    parser.add_argument("--resource-dir", type=Path, help="覆盖内置停用词资源目录")
+    parser.add_argument(
+        "--languages",
+        type=_language_codes,
+        default=DEFAULT_LANGUAGES,
+        help="逗号分隔的 stopwordsiso 语言代码",
+    )
+    parser.add_argument("--timeout", type=float, default=15.0, help="请求超时秒数")
+    parser.add_argument("--width", type=int, default=1920, help="词云宽度")
+    parser.add_argument("--height", type=int, default=1080, help="词云高度")
+    parser.add_argument("--max-words", type=int, default=300, help="词云最大词数")
+    parser.add_argument(
+        "--minimum-token-length",
+        type=int,
+        default=2,
+        help="普通词最短长度；保留词不受此限制",
+    )
+    return parser
+
+
+def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
+    with BilibiliRankingClient(timeout_seconds=args.timeout) as client:
+        fetched = client.fetch_all_ranking()
+
+    bundle = create_output_bundle(args.output_dir, fetched.fetched_at)
+
+    parsed = parse_ranking_records_with_issues(
+        fetched.items,
+        fetched_at=fetched.fetched_at,
+    )
+    accepted, duplicate_issues = deduplicate_records(parsed.records)
+    all_issues = [*parsed.issues, *duplicate_issues]
+
+    policy = load_stopword_policy(args.resource_dir, languages=args.languages)
+    analyzer = TitleAnalyzer(
+        policy,
+        minimum_token_length=args.minimum_token_length,
+    )
+    analysis = analyzer.analyze(accepted)
+
+    write_records_csv(bundle.ranking_csv, accepted)
+
+    generated_wordcloud: Path | None = None
+    if analysis.word_frequencies:
+        generated_wordcloud = render_wordcloud(
+            analysis.word_frequencies,
+            bundle.wordcloud_png,
+            font_path=args.font_path,
+            width=args.width,
+            height=args.height,
+            max_words=args.max_words,
+        )
+
+    return {
+        "抓取条数": len(fetched.items),
+        "有效条数": len(accepted),
+        "拒绝条数": len(all_issues),
+        "排行榜CSV": str(bundle.ranking_csv.resolve()),
+        "词云": str(generated_wordcloud) if generated_wordcloud else None,
+    }
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.timeout <= 0:
+        parser.error("--timeout 必须大于 0")
+    if args.width <= 0 or args.height <= 0 or args.max_words <= 0:
+        parser.error("词云尺寸和最大词数必须大于 0")
+    if args.minimum_token_length <= 0:
+        parser.error("--minimum-token-length 必须大于 0")
+
+    try:
+        summary = run_pipeline(args)
+    except (BilibiliAPIError, FontNotFoundError, RuntimeError, ValueError) as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("已取消。", file=sys.stderr)
+        return 130
+
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

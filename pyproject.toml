@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bilibili-ranking-wordcloud"
+version = "0.1.0"
+description = "抓取 B站全站排行榜并生成多语言词频与词云"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "jieba>=0.42,<1",
+  "requests>=2.31,<3",
+  "stopwordsiso>=0.7,<1",
+  "urllib3>=2,<3",
+  "wordcloud>=1.9,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<10",
+  "ruff>=0.11,<1",
+]
+
+[project.scripts]
+bilibili-rank = "bilibili_ranker.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+bilibili_ranker = [
+  "resources/stopwords/*.txt",
+  "resources/stopwords/*.md",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
