@@ -15,7 +15,6 @@ from .models import VideoRankingRecord
 
 @dataclass(frozen=True, slots=True)
 class OutputBundle:
-    root: Path
     ranking_csv: Path
     wordcloud_png: Path
 
@@ -30,7 +29,6 @@ def create_output_bundle(root: str | Path, fetched_at: datetime) -> OutputBundle
     base = Path(root)
     label = _utc_label(fetched_at)
     return OutputBundle(
-        root=base,
         ranking_csv=base / f"ranking_{label}.csv",
         wordcloud_png=base / f"wordcloud_{label}.png",
     )
@@ -79,7 +77,11 @@ RANKING_CSV_COLUMNS = (
 
 
 def _record_to_csv_row(record: VideoRankingRecord) -> dict[str, Any]:
-    data = record.to_dict()
+    data = {
+        field: getattr(record, field)
+        for field, _ in RANKING_CSV_COLUMNS
+        if hasattr(record, field)
+    }
     data["category_name"] = record.category_v2_name or record.category_name
     data["parent_category_name"] = record.parent_category_v2_name
     return {header: data.get(field) for field, header in RANKING_CSV_COLUMNS}

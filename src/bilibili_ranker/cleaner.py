@@ -10,7 +10,7 @@ from typing import Iterable
 
 import jieba
 
-from .models import RecordIssue, VideoRankingRecord
+from .models import VideoRankingRecord
 from .stopwords import StopwordPolicy, normalize_token
 
 
@@ -33,36 +33,27 @@ def normalize_title(title: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class TitleAnalysisResult:
-    processed_title_count: int
     word_frequencies: dict[str, int]
 
 
 def deduplicate_records(
     records: Iterable[VideoRankingRecord],
-) -> tuple[list[VideoRankingRecord], list[RecordIssue]]:
+) -> tuple[list[VideoRankingRecord], int]:
     """按 BV 号确定性去重，保留排名靠前的记录。"""
 
     accepted: list[VideoRankingRecord] = []
-    issues: list[RecordIssue] = []
+    rejected_count = 0
     first_rank_by_bvid: dict[str, int] = {}
 
     for record in records:
         key = record.bvid.casefold()
         if key in first_rank_by_bvid:
-            issues.append(
-                RecordIssue(
-                    stage="deduplicate",
-                    rank=record.rank,
-                    bvid=record.bvid,
-                    title=record.title,
-                    reason=f"重复 bvid；首次出现于排名 {first_rank_by_bvid[key]}",
-                )
-            )
+            rejected_count += 1
             continue
         first_rank_by_bvid[key] = record.rank
         accepted.append(record)
 
-    return accepted, issues
+    return accepted, rejected_count
 
 
 class TitleAnalyzer:
@@ -116,16 +107,13 @@ class TitleAnalyzer:
 
     def analyze(self, records: Iterable[VideoRankingRecord]) -> TitleAnalysisResult:
         words: Counter[str] = Counter()
-        processed = 0
 
         for record in records:
-            processed += 1
             for candidate in self._candidate_tokens(record.title):
                 token = self._keep_token(candidate)
                 if token:
                     words[token] += 1
 
         return TitleAnalysisResult(
-            processed_title_count=processed,
             word_frequencies=dict(words.most_common()),
         )

@@ -16,8 +16,6 @@ def render_wordcloud(
     width: int = 1920,
     height: int = 1080,
     max_words: int = 300,
-    background_color: str = "white",
-    random_state: int = 42,
 ) -> Path:
     if not frequencies:
         raise ValueError("词频为空，无法生成词云")
@@ -33,11 +31,11 @@ def render_wordcloud(
 
     cloud = WordCloud(
         font_path=str(resolved_font),
-        background_color=background_color,
+        background_color="white",
         width=width,
         height=height,
         max_words=max_words,
-        random_state=random_state,
+        random_state=42,
         collocations=False,
         prefer_horizontal=0.9,
     )

@@ -6,16 +6,10 @@ import unicodedata
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
-from typing import Iterable, Protocol
+from typing import Any, Iterable
 
 
 DEFAULT_LANGUAGES = ("zh", "en", "ja", "ko", "fr", "de", "es", "ru")
-
-
-class TextResource(Protocol):
-    def is_file(self) -> bool: ...
-
-    def read_text(self, encoding: str = "utf-8") -> str: ...
 
 
 def normalize_token(token: str) -> str:
@@ -23,7 +17,7 @@ def normalize_token(token: str) -> str:
     return normalized.casefold()
 
 
-def _read_word_file(path: TextResource) -> set[str]:
+def _read_word_file(path: Any) -> set[str]:
     if not path.is_file():
         raise FileNotFoundError(f"停用词资源不存在：{path}")
 
@@ -36,7 +30,7 @@ def _read_word_file(path: TextResource) -> set[str]:
     return words
 
 
-def default_resource_dir() -> TextResource:
+def default_resource_dir() -> Any:
     return files("bilibili_ranker").joinpath("resources", "stopwords")
 
 
@@ -55,7 +49,7 @@ class StopwordPolicy:
 
 
 def load_stopword_policy(
-    resource_dir: str | Path | TextResource | None = None,
+    resource_dir: Any = None,
     *,
     languages: Iterable[str] = DEFAULT_LANGUAGES,
 ) -> StopwordPolicy:

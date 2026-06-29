@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .cleaner import TitleAnalyzer, deduplicate_records
-from .client import BilibiliAPIError, BilibiliRankingClient
+from .client import BilibiliAPIError, fetch_all_ranking
 from .fonts import FontNotFoundError
-from .models import parse_ranking_records_with_issues
+from .models import parse_ranking_records
 from .stopwords import DEFAULT_LANGUAGES, load_stopword_policy
 from .storage import create_output_bundle, write_records_csv
 from .wordcloud import render_wordcloud
@@ -52,17 +52,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
-    with BilibiliRankingClient(timeout_seconds=args.timeout) as client:
-        fetched = client.fetch_all_ranking()
+    fetched = fetch_all_ranking(timeout_seconds=args.timeout)
 
     bundle = create_output_bundle(args.output_dir, fetched.fetched_at)
 
-    parsed = parse_ranking_records_with_issues(
-        fetched.items,
-        fetched_at=fetched.fetched_at,
-    )
-    accepted, duplicate_issues = deduplicate_records(parsed.records)
-    all_issues = [*parsed.issues, *duplicate_issues]
+    records, parse_rejected_count = parse_ranking_records(fetched.items)
+    accepted, duplicate_rejected_count = deduplicate_records(records)
+    rejected_count = parse_rejected_count + duplicate_rejected_count
 
     policy = load_stopword_policy(args.resource_dir, languages=args.languages)
     analyzer = TitleAnalyzer(
@@ -87,7 +83,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "抓取条数": len(fetched.items),
         "有效条数": len(accepted),
-        "拒绝条数": len(all_issues),
+        "拒绝条数": rejected_count,
         "排行榜CSV": str(bundle.ranking_csv.resolve()),
         "词云": str(generated_wordcloud) if generated_wordcloud else None,
     }
