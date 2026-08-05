@@ -42,7 +42,8 @@ class StopwordPolicy:
 
     def should_remove(self, token: str) -> bool:
         normalized = normalize_token(token)
-        return normalized in self.stopwords and normalized not in self.allowlist
+        # allowlist 词在加载时已从 stopwords 中剔除，且调用方先用 is_allowed 短路。
+        return normalized in self.stopwords
 
     def is_allowed(self, token: str) -> bool:
         return normalize_token(token) in self.allowlist

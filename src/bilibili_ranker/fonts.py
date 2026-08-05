@@ -98,13 +98,17 @@ def resolve_font_path(explicit: str | Path | None = None) -> Path:
             direct = root / filename
             if direct.is_file():
                 return direct.resolve()
+        try:
+            matches = {
+                path.name: path
+                for path in root.rglob("*")
+                if path.is_file() and path.name in _CANDIDATE_FILES
+            }
+        except OSError:
+            continue
         for filename in _CANDIDATE_FILES:
-            try:
-                match = next(root.rglob(filename), None)
-            except OSError:
-                match = None
-            if match and match.is_file():
-                return match.resolve()
+            if filename in matches:
+                return matches[filename].resolve()
 
     fontconfig_font = _fontconfig_match()
     if fontconfig_font:

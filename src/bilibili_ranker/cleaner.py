@@ -43,14 +43,14 @@ def deduplicate_records(
 
     accepted: list[VideoRankingRecord] = []
     rejected_count = 0
-    first_rank_by_bvid: dict[str, int] = {}
+    seen_bvids: set[str] = set()
 
     for record in records:
         key = record.bvid.casefold()
-        if key in first_rank_by_bvid:
+        if key in seen_bvids:
             rejected_count += 1
             continue
-        first_rank_by_bvid[key] = record.rank
+        seen_bvids.add(key)
         accepted.append(record)
 
     return accepted, rejected_count
