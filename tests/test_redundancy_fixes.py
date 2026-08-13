@@ -27,16 +27,17 @@ def _check() -> None:
     for word in ("视频", "bilibili", "完整版"):
         assert policy.should_remove(word) is True
 
-    # 去重只关心 bvid（大小写不敏感），不依赖 rank 值。
+    # BV 号 base58 大小写敏感，仅按完整字符串精确去重，不依赖 rank 值。
     items = [
         {"bvid": "BV1aa", "title": "t1", "owner": {}, "stat": {}},
-        {"bvid": "bv1aa", "title": "t2", "owner": {}, "stat": {}},  # 同 BV，大小写不同
-        {"bvid": "BV1bb", "title": "t3", "owner": {}, "stat": {}},
+        {"bvid": "BV1aa", "title": "t2", "owner": {}, "stat": {}},  # 重复项
+        {"bvid": "bv1aa", "title": "t3", "owner": {}, "stat": {}},  # 大小写不同，不同视频
+        {"bvid": "BV1bb", "title": "t4", "owner": {}, "stat": {}},
     ]
     records, _ = parse_ranking_records(items)
     accepted, rejected = deduplicate_records(records)
     assert rejected == 1
-    assert [r.bvid for r in accepted] == ["BV1aa", "BV1bb"]
+    assert [r.bvid for r in accepted] == ["BV1aa", "bv1aa", "BV1bb"]
 
 
 if __name__ == "__main__":

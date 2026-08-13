@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable, Mapping
+from typing import Any
+
+_CN_TIMEZONE = timezone(timedelta(hours=8))
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
@@ -18,14 +21,21 @@ def _text(value: Any) -> str:
 def _optional_int(value: Any) -> int | None:
     if value is None or value == "":
         return None
-    parsed = int(value)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
     return parsed if parsed >= 0 else None
 
 
 def _timestamp_to_datetime_text(value: int | None) -> str | None:
     if value is None:
         return None
-    return datetime.fromtimestamp(value, tz=timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        moment = datetime.fromtimestamp(value, tz=_CN_TIMEZONE)
+    except (OSError, OverflowError, ValueError):
+        return None
+    return moment.strftime("%Y-%m-%d %H:%M:%S")
 
 
 @dataclass(frozen=True, slots=True)

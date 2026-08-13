@@ -56,41 +56,50 @@ def _atomic_csv_write(
     return destination
 
 
-RANKING_CSV_COLUMNS = (
-    ("rank", "排名"),
-    ("bvid", "BV号"),
-    ("video_url", "视频链接"),
-    ("title", "视频标题"),
-    ("category_name", "视频分区"),
-    ("parent_category_name", "主分区"),
-    ("uploader_name", "UP主"),
-    ("published_at", "发布时间（北京时间）"),
-    ("duration_seconds", "视频时长（秒）"),
-    ("view_count", "播放量"),
-    ("danmaku_count", "弹幕数"),
-    ("reply_count", "评论数"),
-    ("favorite_count", "收藏数"),
-    ("coin_count", "投币数"),
-    ("share_count", "分享数"),
-    ("like_count", "点赞数"),
+RANKING_CSV_HEADERS = (
+    "排名",
+    "BV号",
+    "视频链接",
+    "视频标题",
+    "视频分区",
+    "主分区",
+    "UP主",
+    "发布时间（北京时间）",
+    "视频时长（秒）",
+    "播放量",
+    "弹幕数",
+    "评论数",
+    "收藏数",
+    "投币数",
+    "分享数",
+    "点赞数",
 )
 
 
 def _record_to_csv_row(record: VideoRankingRecord) -> dict[str, Any]:
-    data = {
-        field: getattr(record, field)
-        for field, _ in RANKING_CSV_COLUMNS
-        if hasattr(record, field)
+    return {
+        "排名": record.rank,
+        "BV号": record.bvid,
+        "视频链接": record.video_url,
+        "视频标题": record.title,
+        "视频分区": record.category_v2_name or record.category_name,
+        "主分区": record.parent_category_v2_name,
+        "UP主": record.uploader_name,
+        "发布时间（北京时间）": record.published_at,
+        "视频时长（秒）": record.duration_seconds,
+        "播放量": record.view_count,
+        "弹幕数": record.danmaku_count,
+        "评论数": record.reply_count,
+        "收藏数": record.favorite_count,
+        "投币数": record.coin_count,
+        "分享数": record.share_count,
+        "点赞数": record.like_count,
     }
-    data["category_name"] = record.category_v2_name or record.category_name
-    data["parent_category_name"] = record.parent_category_v2_name
-    return {header: data.get(field) for field, header in RANKING_CSV_COLUMNS}
 
 
 def write_records_csv(destination: Path, records: Iterable[VideoRankingRecord]) -> Path:
-    fieldnames = tuple(header for _, header in RANKING_CSV_COLUMNS)
     return _atomic_csv_write(
         destination,
-        fieldnames,
+        RANKING_CSV_HEADERS,
         (_record_to_csv_row(record) for record in records),
     )

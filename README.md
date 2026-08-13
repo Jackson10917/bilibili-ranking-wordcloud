@@ -17,7 +17,7 @@
 
 ```
 ├─ src/bilibili_ranker/
-│  ├─ client.py          # API 请求、重试与响应校验
+│  ├─ client.py          # API 请求与响应校验
 │  ├─ models.py          # API 字段解析
 │  ├─ cleaner.py         # 去重、分词和停用词过滤
 │  ├─ stopwords.py       # 多语言停用词与保留词策略

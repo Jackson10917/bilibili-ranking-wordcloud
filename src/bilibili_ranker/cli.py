@@ -10,7 +10,6 @@ from typing import Any, Sequence
 
 from .cleaner import TitleAnalyzer, deduplicate_records
 from .client import BilibiliAPIError, fetch_all_ranking
-from .fonts import FontNotFoundError
 from .models import parse_ranking_records
 from .stopwords import DEFAULT_LANGUAGES, load_stopword_policy
 from .storage import create_output_bundle, write_records_csv
@@ -101,7 +100,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         summary = run_pipeline(args)
-    except (BilibiliAPIError, FontNotFoundError, RuntimeError, ValueError) as exc:
+    except (BilibiliAPIError, RuntimeError, ValueError) as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:

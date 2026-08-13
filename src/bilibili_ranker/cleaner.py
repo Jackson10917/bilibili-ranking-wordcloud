@@ -25,6 +25,8 @@ _CHUNK_PATTERN = re.compile(
     r"|\d+(?:\.\d+)?"
 )
 
+_NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?")
+
 
 def normalize_title(title: str) -> str:
     normalized = unicodedata.normalize("NFKC", title)
@@ -46,11 +48,10 @@ def deduplicate_records(
     seen_bvids: set[str] = set()
 
     for record in records:
-        key = record.bvid.casefold()
-        if key in seen_bvids:
+        if record.bvid in seen_bvids:
             rejected_count += 1
             continue
-        seen_bvids.add(key)
+        seen_bvids.add(record.bvid)
         accepted.append(record)
 
     return accepted, rejected_count
@@ -97,7 +98,7 @@ class TitleAnalyzer:
             return None
         if self._policy.is_allowed(token):
             return token
-        if token.isdecimal():
+        if _NUMBER_PATTERN.fullmatch(token):
             return None
         if len(token) < self._minimum_token_length:
             return None
