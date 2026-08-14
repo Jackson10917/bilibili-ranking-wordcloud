@@ -7,13 +7,20 @@ import unicodedata
 from collections import Counter
 from typing import Iterable
 
-import jieba
-
 from .models import VideoRankingRecord
 from .stopwords import StopwordPolicy, normalize_token
 
-# jieba 首次分词会往 stderr 打 "Building prefix dict ..."，对 CLI 输出是纯噪音。
-jieba.setLogLevel("ERROR")
+
+def _jieba_lcut(text: str) -> list[str]:
+    """延迟导入 jieba，缺依赖时给出与 wordcloud/stopwordsiso 一致的友好错误。"""
+    try:
+        import jieba as _jieba
+    except ImportError as exc:
+        raise RuntimeError("缺少 jieba，请先安装项目依赖") from exc
+    # jieba 首次分词会往 stderr 打 "Building prefix dict ..."，对 CLI 输出是纯噪音。
+    # setLogLevel 在导入后立即调用，只在第一次真正使用时执行，避免全局副作用。
+    _jieba.setLogLevel("ERROR")
+    return _jieba.lcut(text, cut_all=False)
 
 
 _CJK_RANGE = r"\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U000323af"
@@ -30,7 +37,7 @@ _CHUNK_PATTERN = re.compile(
     rf"[{_LATIN_LETTERS}][{_LATIN_ALNUM}]*(?:['\u2019._-][{_LATIN_ALNUM}]+)*(?:\+\+|#)?"
     rf"|\d+[{_LATIN_LETTERS}][{_LATIN_ALNUM}]*"
     rf"|[{_CJK_RANGE}]+"
-    r"|[\u3040-\u30ff\u31f0-\u31ff]+"
+    r"|[\u3040-\u30fa\u30fc-\u30ff\u31f0-\u31ff]+"
     # NFKC 会把兼容型谚文字母（ㅋ U+314B）折叠到 Hangul Jamo 区，所以两段都要收。
     r"|[\u1100-\u11ff\uac00-\ud7af]+"
     r"|[\u0400-\u04ff]+"
@@ -86,7 +93,7 @@ class TitleAnalyzer:
         for match in _CHUNK_PATTERN.finditer(normalized):
             chunk = match.group(0)
             if _CJK_PATTERN.fullmatch(chunk):
-                pieces = jieba.lcut(chunk, cut_all=False)
+                pieces = _jieba_lcut(chunk)
                 tokens.extend(pieces)
                 # jieba 只有中文词典，日文汉字词（実況、洗濯）会被全切成单字后被
                 # minimum_token_length 丢干净。全单字说明词典没命中，整块也留一份。

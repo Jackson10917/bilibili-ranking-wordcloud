@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -15,6 +16,14 @@ from urllib3.util.retry import Retry
 RANKING_PAGE_URL = "https://www.bilibili.com/v/popular/rank/all"
 RANKING_API_URL = "https://api.bilibili.com/x/web-interface/ranking/v2"
 SPI_API_URL = "https://api.bilibili.com/x/frontend/finger/spi"
+
+_DEFAULT_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/140.0.0.0 Safari/537.36"
+)
+# 可通过环境变量覆盖，便于浏览器版本过时后无需改码。
+_UA = os.environ.get("BILIBILI_UA") or _DEFAULT_UA
 
 _RISK_CONTROL_CODE = -352
 _RISK_CONTROL_STATUS = 412
@@ -87,11 +96,7 @@ def _refresh_buvid(
 def fetch_all_ranking(
     *,
     timeout_seconds: float = 15.0,
-    user_agent: str = (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/140.0.0.0 Safari/537.36"
-    ),
+    user_agent: str = _UA,
 ) -> RankingFetchResult:
     """请求当前全站榜，接口和参数保持为 `rid=0&type=all`。
 

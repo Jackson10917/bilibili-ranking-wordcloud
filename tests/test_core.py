@@ -587,6 +587,63 @@ def test_stopword_errors_surface_before_network() -> None:
         assert main(["--languages", "zh,xx"]) == 1
 
 
+def test_font_explicit_path_validated() -> None:
+    # 显式路径不存在时应抛 FontNotFoundError，而不是 FileNotFoundError 或 AttributeError。
+    import tempfile
+
+    from bilibili_ranker.fonts import FontNotFoundError, resolve_font_path
+
+    with tempfile.TemporaryDirectory() as d:
+        # 后缀不对
+        bad_ext = Path(d) / "font.bmp"
+        bad_ext.write_bytes(b"")
+        try:
+            resolve_font_path(bad_ext)
+        except FontNotFoundError:
+            pass
+        else:
+            raise AssertionError("不受支持的后缀未抛出 FontNotFoundError")
+
+        # 文件不存在
+        try:
+            resolve_font_path(Path(d) / "nonexistent.ttf")
+        except FontNotFoundError:
+            pass
+        else:
+            raise AssertionError("不存在的路径未抛出 FontNotFoundError")
+
+
+def test_font_env_var_overrides_default() -> None:
+    # BILIBILI_WORDCLOUD_FONT 指向有效字体时应返回该路径；无效路径应抛 FontNotFoundError。
+    import os
+    import tempfile
+
+    from bilibili_ranker.fonts import FontNotFoundError, resolve_font_path
+
+    with tempfile.TemporaryDirectory() as d:
+        valid = Path(d) / "myfont.ttf"
+        valid.write_bytes(b"dummy")
+
+        old = os.environ.get("BILIBILI_WORDCLOUD_FONT")
+        try:
+            os.environ["BILIBILI_WORDCLOUD_FONT"] = str(valid)
+            result = resolve_font_path()
+            assert result == valid.resolve()
+
+            os.environ["BILIBILI_WORDCLOUD_FONT"] = str(Path(d) / "missing.ttf")
+            try:
+                resolve_font_path()
+            except FontNotFoundError:
+                pass
+            else:
+                raise AssertionError("无效环境变量路径未抛出 FontNotFoundError")
+        finally:
+            if old is None:
+                os.environ.pop("BILIBILI_WORDCLOUD_FONT", None)
+            else:
+                os.environ["BILIBILI_WORDCLOUD_FONT"] = old
+
+
 if __name__ == "__main__":
     import pytest as _pytest
 
