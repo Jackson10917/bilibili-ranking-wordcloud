@@ -29,6 +29,8 @@
 │     ├─ custom_stopwords.txt
 │     ├─ allowlist.txt
 │     └─ README.md
+├─ tests/
+│  └─ test_redundancy_fixes.py
 ├─ .gitignore
 ├─ LICENSE
 ├─ pyproject.toml

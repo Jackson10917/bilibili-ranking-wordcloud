@@ -100,7 +100,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         summary = run_pipeline(args)
-    except (BilibiliAPIError, RuntimeError, ValueError) as exc:
+    except (BilibiliAPIError, RuntimeError, ValueError, OSError) as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
