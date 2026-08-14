@@ -8,7 +8,7 @@ from importlib.resources import files
 
 try:
     from importlib.abc import Traversable
-except ImportError:  # Python 3.10.0-3.10.11 等旧版本
+except ImportError:  # Python 3.12+ 已从 importlib.abc 移除 Traversable
     from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Iterable
@@ -41,17 +41,8 @@ def default_resource_dir() -> Traversable:
 
 @dataclass(frozen=True, slots=True)
 class StopwordPolicy:
-    languages: tuple[str, ...]
     stopwords: frozenset[str]
     allowlist: frozenset[str]
-
-    def should_remove(self, token: str) -> bool:
-        normalized = normalize_token(token)
-        # allowlist 词在加载时已从 stopwords 中剔除，且调用方先用 is_allowed 短路。
-        return normalized in self.stopwords
-
-    def is_allowed(self, token: str) -> bool:
-        return normalize_token(token) in self.allowlist
 
 
 def load_stopword_policy(
@@ -82,7 +73,6 @@ def load_stopword_policy(
     effective = (base | custom) - allowlist
 
     return StopwordPolicy(
-        languages=language_codes,
         stopwords=frozenset(effective),
         allowlist=frozenset(allowlist),
     )

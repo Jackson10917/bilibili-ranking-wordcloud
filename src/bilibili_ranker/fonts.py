@@ -71,17 +71,26 @@ def _fontconfig_match() -> Path | None:
     for family in _FONTCONFIG_FAMILIES:
         try:
             result = subprocess.run(
-                (executable, "-f", "%{file}\n", family),
+                (executable, "-f", "%{file}\n%{family}\n", family),
                 check=False,
                 capture_output=True,
                 text=True,
                 timeout=3,
             )
         except (OSError, subprocess.TimeoutExpired):
-            return None
-        candidate = Path(result.stdout.strip().splitlines()[0]) if result.stdout.strip() else None
-        if candidate and candidate.is_file():
-            return candidate.resolve()
+            continue
+        lines = result.stdout.strip().splitlines()
+        if result.returncode != 0 or len(lines) < 2 or not lines[0]:
+            continue
+        candidate = Path(lines[0])
+        if not candidate.is_file():
+            continue
+        # fc-match 找不到指定 family 时会静默回退到默认字体，所以要比对返回的 family 名。
+        # %{family} 会输出该字体的全部别名（如 "Microsoft YaHei,微软雅黑"），逐个比对。
+        names = {name.strip().casefold() for name in lines[1].split(",")}
+        if family.casefold() not in names:
+            continue
+        return candidate.resolve()
     return None
 
 

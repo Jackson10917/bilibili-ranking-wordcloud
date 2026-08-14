@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import Counter
-from dataclasses import dataclass
 from typing import Iterable
 
 import jieba
@@ -16,14 +15,18 @@ from .stopwords import StopwordPolicy, normalize_token
 
 _CJK_RANGE = r"\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U000323af"
 
+# 拉丁字母词元包含重音字符（café、déjà），否则会被拆成单字母碎片。
+# 区间挖掉 ×(U+00D7) 和 ÷(U+00F7)：它们是数学符号，不是字母（XML NameChar 经典区间）。
+_LATIN_LETTERS = r"A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u024f"
+_LATIN_ALNUM = r"A-Za-z0-9\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u024f"
+
 _CHUNK_PATTERN = re.compile(
-    r"[A-Za-z][A-Za-z0-9]*(?:[._-][A-Za-z0-9]+)*(?:\+\+|#)?"
-    r"|\d+[A-Za-z][A-Za-z0-9]*"
+    rf"[{_LATIN_LETTERS}][{_LATIN_ALNUM}]*(?:[._-][{_LATIN_ALNUM}]+)*(?:\+\+|#)?"
+    rf"|\d+[{_LATIN_LETTERS}][{_LATIN_ALNUM}]*"
     rf"|[{_CJK_RANGE}]+"
     r"|[\u3040-\u30ff\u31f0-\u31ff]+"
     r"|[\uac00-\ud7af]+"
     r"|[\u0400-\u04ff]+"
-    r"|[\u00c0-\u024f]+"
     r"|\d+(?:\.\d+)?"
 )
 
@@ -34,11 +37,6 @@ _NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?")
 def normalize_title(title: str) -> str:
     normalized = unicodedata.normalize("NFKC", title)
     return " ".join(normalized.split())
-
-
-@dataclass(frozen=True, slots=True)
-class TitleAnalysisResult:
-    word_frequencies: dict[str, int]
 
 
 def deduplicate_records(
@@ -101,7 +99,7 @@ class TitleAnalyzer:
             return None
         return token
 
-    def analyze(self, records: Iterable[VideoRankingRecord]) -> TitleAnalysisResult:
+    def analyze(self, records: Iterable[VideoRankingRecord]) -> dict[str, int]:
         words: Counter[str] = Counter()
 
         for record in records:
@@ -110,6 +108,4 @@ class TitleAnalyzer:
                 if token:
                     words[token] += 1
 
-        return TitleAnalysisResult(
-            word_frequencies=dict(words.most_common()),
-        )
+        return dict(words.most_common())

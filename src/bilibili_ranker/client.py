@@ -14,6 +14,10 @@ from urllib3.util.retry import Retry
 
 RANKING_PAGE_URL = "https://www.bilibili.com/v/popular/rank/all"
 RANKING_API_URL = "https://api.bilibili.com/x/web-interface/ranking/v2"
+SPI_API_URL = "https://api.bilibili.com/x/frontend/finger/spi"
+
+_RISK_CONTROL_CODE = -352
+_RISK_CONTROL_ATTEMPTS = 2
 
 
 class BilibiliAPIError(RuntimeError):
@@ -26,6 +30,41 @@ class RankingFetchResult:
     items: tuple[Mapping[str, Any], ...]
 
 
+def _refresh_buvid(
+    session: requests.Session,
+    *,
+    user_agent: str,
+    timeout_seconds: float,
+) -> None:
+    """向会话补充风控所需的 buvid3/buvid4 cookie；请求或响应异常时静默忽略。"""
+
+    try:
+        response = session.get(
+            SPI_API_URL,
+            headers={
+                "Accept": "application/json, text/plain, */*",
+                "Referer": "https://www.bilibili.com/",
+                "User-Agent": user_agent,
+            },
+            timeout=timeout_seconds,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError):
+        return
+    if not isinstance(payload, Mapping):
+        return
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return
+    b_3 = data.get("b_3")
+    b_4 = data.get("b_4")
+    if not b_3 or not b_4:
+        return
+    session.cookies.set("buvid3", b_3, domain=".bilibili.com")
+    session.cookies.set("buvid4", b_4, domain=".bilibili.com")
+
+
 def fetch_all_ranking(
     *,
     timeout_seconds: float = 15.0,
@@ -35,7 +74,10 @@ def fetch_all_ranking(
         "Chrome/140.0.0.0 Safari/537.36"
     ),
 ) -> RankingFetchResult:
-    """请求当前全站榜，接口和参数保持为 `rid=0&type=all`。"""
+    """请求当前全站榜，接口和参数保持为 `rid=0&type=all`。
+
+    被风控拦截（code=-352）时刷新 buvid cookie 后重试。
+    """
 
     fetched_at = datetime.now(timezone.utc)
     session = requests.Session()
@@ -50,42 +92,57 @@ def fetch_all_ranking(
         ),
     )
     try:
-        response = session.get(
-            RANKING_API_URL,
-            params={"rid": 0, "type": "all"},
-            headers={
-                "Accept": "application/json, text/plain, */*",
-                "Referer": RANKING_PAGE_URL,
-                "User-Agent": user_agent,
-            },
-            timeout=timeout_seconds,
+        for attempt in range(_RISK_CONTROL_ATTEMPTS):
+            response = session.get(
+                RANKING_API_URL,
+                params={"rid": 0, "type": "all"},
+                headers={
+                    "Accept": "application/json, text/plain, */*",
+                    "Referer": RANKING_PAGE_URL,
+                    "User-Agent": user_agent,
+                },
+                timeout=timeout_seconds,
+            )
+            # 风控拦截常伴随 HTTP 412，业务码在响应体里，所以先读体再判 HTTP 状态。
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            code = payload.get("code") if isinstance(payload, Mapping) else None
+
+            if code == _RISK_CONTROL_CODE:
+                # 最后一轮再刷新也没有消费者，其余轮次刷新 buvid 后重试。
+                if attempt < _RISK_CONTROL_ATTEMPTS - 1:
+                    _refresh_buvid(
+                        session,
+                        user_agent=user_agent,
+                        timeout_seconds=timeout_seconds,
+                    )
+                continue
+
+            response.raise_for_status()
+            if payload is None:
+                raise BilibiliAPIError("排行榜响应不是有效 JSON")
+            if not isinstance(payload, Mapping):
+                raise BilibiliAPIError("排行榜响应根节点不是 JSON 对象")
+            if code != 0:
+                message = payload.get("message") or payload.get("msg") or "未知错误"
+                raise BilibiliAPIError(f"B站返回 code={code}：{message}")
+
+            data = payload.get("data")
+            if not isinstance(data, Mapping):
+                raise BilibiliAPIError("排行榜响应缺少 data 对象")
+            items = data.get("list")
+            if not isinstance(items, list):
+                raise BilibiliAPIError("排行榜响应的 data.list 不是数组")
+            if not all(isinstance(item, Mapping) for item in items):
+                raise BilibiliAPIError("排行榜响应包含非对象记录")
+            return RankingFetchResult(fetched_at=fetched_at, items=tuple(items))
+
+        raise BilibiliAPIError(
+            f"B站风控拦截（code={_RISK_CONTROL_CODE}），请稍后重试"
         )
-        response.raise_for_status()
     except requests.RequestException as exc:
         raise BilibiliAPIError(f"排行榜请求失败：{exc}") from exc
     finally:
         session.close()
-
-    try:
-        payload = response.json()
-    except ValueError as exc:
-        raise BilibiliAPIError("排行榜响应不是有效 JSON") from exc
-
-    if not isinstance(payload, Mapping):
-        raise BilibiliAPIError("排行榜响应根节点不是 JSON 对象")
-
-    code = payload.get("code")
-    if code != 0:
-        message = payload.get("message") or payload.get("msg") or "未知错误"
-        raise BilibiliAPIError(f"B站返回 code={code}：{message}")
-
-    data = payload.get("data")
-    if not isinstance(data, Mapping):
-        raise BilibiliAPIError("排行榜响应缺少 data 对象")
-    items = data.get("list")
-    if not isinstance(items, list):
-        raise BilibiliAPIError("排行榜响应的 data.list 不是数组")
-    if not all(isinstance(item, Mapping) for item in items):
-        raise BilibiliAPIError("排行榜响应包含非对象记录")
-
-    return RankingFetchResult(fetched_at=fetched_at, items=tuple(items))

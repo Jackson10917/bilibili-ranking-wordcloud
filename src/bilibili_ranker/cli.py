@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .cleaner import TitleAnalyzer, deduplicate_records
-from .client import BilibiliAPIError, fetch_all_ranking
+from .client import fetch_all_ranking
 from .models import parse_ranking_records
 from .stopwords import DEFAULT_LANGUAGES, load_stopword_policy
 from .storage import create_output_bundle, write_records_csv
@@ -64,15 +64,15 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         policy,
         minimum_token_length=args.minimum_token_length,
     )
-    analysis = analyzer.analyze(accepted)
+    frequencies = analyzer.analyze(accepted)
 
     write_records_csv(bundle.ranking_csv, accepted)
 
     generated_wordcloud: Path | None = None
-    if analysis.word_frequencies:
+    if frequencies:
         try:
             generated_wordcloud = render_wordcloud(
-                analysis.word_frequencies,
+                frequencies,
                 bundle.wordcloud_png,
                 font_path=args.font_path,
                 width=args.width,
