@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Mapping
 
 from .fonts import resolve_font_path
+from .storage import temporary_path
 
 
 def render_wordcloud(
@@ -44,9 +45,10 @@ def render_wordcloud(
     )
     cloud.generate_from_frequencies(dict(frequencies))
     # 和 CSV 一样临时文件加 os.replace：写一半失败不会留下半截 PNG。
-    temporary = destination.with_name(f".{destination.name}.tmp")
+    # 临时文件以 .tmp 结尾，PIL 无法从扩展名推断格式，必须显式指定 format。
+    temporary = temporary_path(destination)
     try:
-        cloud.to_file(str(temporary))
+        cloud.to_image().save(str(temporary), format="PNG")
         os.replace(temporary, destination)
     finally:
         temporary.unlink(missing_ok=True)

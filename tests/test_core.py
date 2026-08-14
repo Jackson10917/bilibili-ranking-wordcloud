@@ -246,6 +246,38 @@ def test_fetch_survives_malformed_buvid() -> None:
             raise AssertionError("畸形 buvid 未收敛成 BilibiliAPIError")
 
 
+def test_fetch_retries_on_412_without_json_body() -> None:
+    # 真实风控常返回 412 + HTML（无 JSON 业务码），此时也必须刷 buvid 重试。
+    from unittest.mock import patch
+
+    from bilibili_ranker.client import SPI_API_URL, fetch_all_ranking
+
+    spi_calls = 0
+    ranking_calls = 0
+
+    def fake_get(self: requests.Session, url: str, **kwargs: object) -> requests.Response:
+        nonlocal spi_calls, ranking_calls
+        if url == SPI_API_URL:
+            spi_calls += 1
+            return _fake_json_response({"code": 0, "data": {"b_3": "b3", "b_4": "b4"}})
+        ranking_calls += 1
+        if ranking_calls == 1:
+            response = requests.Response()
+            response.status_code = 412
+            response._content = b"<html>risk control</html>"
+            return response
+        return _fake_json_response(
+            {"code": 0, "data": {"list": [{"bvid": "BV1aa", "title": "t"}]}}
+        )
+
+    with patch.object(requests.Session, "get", fake_get):
+        result = fetch_all_ranking()
+
+    assert [item["bvid"] for item in result.items] == ["BV1aa"]
+    assert spi_calls == 1
+    assert ranking_calls == 2
+
+
 def test_fetch_reports_http_error() -> None:
     # 非风控的 HTTP 错误仍要抛错，不能因为先读响应体而被吞掉。
     from unittest.mock import patch
@@ -264,11 +296,12 @@ def test_fetch_reports_http_error() -> None:
             raise AssertionError("HTTP 503 未抛出 BilibiliAPIError")
 
 
-def test_fetch_over_real_http_sends_buvid_cookie() -> None:
-    """走完整 requests 发送链路：mock Session.get 的测试测不出 cookie domain 写错。
+def test_fetch_over_real_http_retries_after_412() -> None:
+    """走完整 requests 收发链路，锁死 412 的响应体能回到业务代码并触发第二轮。
 
-    domain 配成 `.example.com` 时 cookie jar 里照样能查到，但请求头不会带上；
-    只有真实 prepare_request 才能抓到。同时锁死 412+(-352) 能到达业务分支。
+    注意：buvid cookie 的 domain 是 `.bilibili.com`，不会发给 127.0.0.1，
+    所以这里不断言请求头里的 cookie，domain 正确性由
+    test_buvid_cookie_reaches_request_header 负责。
     """
 
     import threading
@@ -276,7 +309,7 @@ def test_fetch_over_real_http_sends_buvid_cookie() -> None:
 
     from bilibili_ranker import client as client_module
 
-    seen_cookie_headers: list[str | None] = []
+    ranking_calls: list[str] = []
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args: object) -> None:
@@ -286,8 +319,8 @@ def test_fetch_over_real_http_sends_buvid_cookie() -> None:
             if self.path.startswith("/spi"):
                 body, status = {"code": 0, "data": {"b_3": "b3", "b_4": "b4"}}, 200
             else:
-                seen_cookie_headers.append(self.headers.get("Cookie"))
-                if len(seen_cookie_headers) == 1:
+                ranking_calls.append(self.path)
+                if len(ranking_calls) == 1:
                     body, status = {"code": -352, "message": "risk"}, 412
                 else:
                     body, status = (
@@ -321,7 +354,7 @@ def test_fetch_over_real_http_sends_buvid_cookie() -> None:
 
     assert [item["bvid"] for item in result.items] == ["BV1aa"]
     # 412 的响应体确实交回业务代码，-352 分支可达并触发了第二轮请求。
-    assert len(seen_cookie_headers) == 2
+    assert len(ranking_calls) == 2
 
 
 def test_buvid_cookie_reaches_request_header() -> None:
@@ -417,7 +450,7 @@ def test_wordcloud_write_is_atomic() -> None:
             def generate_from_frequencies(self, _: dict) -> None:
                 pass
 
-            def to_file(self, _: str) -> None:
+            def to_image(self) -> object:
                 raise OSError("disk full")
 
         original = sys.modules.get("wordcloud")
@@ -443,6 +476,38 @@ def test_wordcloud_write_is_atomic() -> None:
         assert leftovers == []
 
 
+def test_wordcloud_renders_real_png() -> None:
+    # 走真实 WordCloud + PIL 保存路径：临时文件扩展名是 .tmp，PIL 推不出格式，
+    # 必须显式 format="PNG"，否则整个词云功能 100% 失效。
+    from bilibili_ranker.fonts import resolve_font_path
+    from bilibili_ranker.wordcloud import render_wordcloud
+
+    try:
+        resolve_font_path(None)
+    except RuntimeError:
+        return  # 环境无 CJK 字体，跳过
+
+    with tempfile.TemporaryDirectory() as directory:
+        destination = Path(directory) / "wc.png"
+        rendered = render_wordcloud({"魔方": 5, "教程": 3}, destination, width=200, height=100)
+        assert rendered.exists()
+        assert destination.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+        leftovers = [p.name for p in Path(directory).iterdir() if p.name.endswith(".tmp")]
+        assert leftovers == []
+
+
+def test_japanese_kanji_word_survives_jieba() -> None:
+    # jieba 只有中文词典，「実況」会被切成単字后被最短长度过滤掉；
+    # 全单字时保留整块，日文汉字词才不会系统性丢失。
+    analyzer = TitleAnalyzer(load_stopword_policy())
+    record = VideoRankingRecord.from_api_item(
+        {"bvid": "BV1aa", "title": "ゲーム実況"}, rank=1
+    )
+    frequencies = analyzer.analyze([record])
+    assert "実況" in frequencies
+    assert "ゲーム" in frequencies
+
+
 if __name__ == "__main__":
     test_stopword_policy()
     test_deduplicate_records()
@@ -458,10 +523,13 @@ if __name__ == "__main__":
     test_fetch_raises_when_risk_control_persists()
     test_fetch_survives_malformed_buvid()
     test_fetch_reports_http_error()
-    test_fetch_over_real_http_sends_buvid_cookie()
+    test_fetch_retries_on_412_without_json_body()
+    test_fetch_over_real_http_retries_after_412()
     test_buvid_cookie_reaches_request_header()
     test_session_keeps_transient_retry_config()
     test_atomic_csv_write()
     test_non_finite_timeout_rejected()
     test_wordcloud_write_is_atomic()
+    test_wordcloud_renders_real_png()
+    test_japanese_kanji_word_survives_jieba()
     print("ok")

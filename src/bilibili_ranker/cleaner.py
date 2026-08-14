@@ -88,7 +88,13 @@ class TitleAnalyzer:
         for match in _CHUNK_PATTERN.finditer(normalized):
             chunk = match.group(0)
             if _CJK_PATTERN.fullmatch(chunk):
-                tokens.extend(jieba.lcut(chunk, cut_all=False))
+                pieces = jieba.lcut(chunk, cut_all=False)
+                tokens.extend(pieces)
+                # jieba 只有中文词典，日文汉字词（実況、洗濯）会被全切成单字后被
+                # minimum_token_length 丢干净。全单字说明词典没命中，整块也留一份。
+                # ponytail: 启发式；要精确切日语得上 mecab/UniDic 词典。
+                if len(chunk) > 1 and all(len(piece) == 1 for piece in pieces):
+                    tokens.append(chunk)
             else:
                 tokens.append(chunk)
         return tokens

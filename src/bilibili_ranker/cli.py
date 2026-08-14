@@ -82,8 +82,11 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
                 height=args.height,
                 max_words=args.max_words,
             )
-        except (RuntimeError, ValueError, OSError) as exc:
+        # 超大 --width/--height 会让 PIL 抛 MemoryError，不能以 traceback 收场。
+        except (RuntimeError, ValueError, OSError, MemoryError) as exc:
             print(f"警告：词云生成失败，仅输出 CSV：{exc}", file=sys.stderr)
+    elif accepted:
+        print("警告：标题清洗后没有可用词元，只输出 CSV。", file=sys.stderr)
 
     return {
         "抓取条数": len(fetched.items),

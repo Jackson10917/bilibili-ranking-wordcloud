@@ -17,6 +17,7 @@ RANKING_API_URL = "https://api.bilibili.com/x/web-interface/ranking/v2"
 SPI_API_URL = "https://api.bilibili.com/x/frontend/finger/spi"
 
 _RISK_CONTROL_CODE = -352
+_RISK_CONTROL_STATUS = 412
 _RISK_CONTROL_ATTEMPTS = 2
 
 
@@ -93,7 +94,7 @@ def fetch_all_ranking(
 ) -> RankingFetchResult:
     """请求当前全站榜，接口和参数保持为 `rid=0&type=all`。
 
-    被风控拦截（code=-352）时刷新 buvid cookie 后重试。
+    被风控拦截（业务码 -352，或只有 HTTP 412 没有 JSON 体）时刷新 buvid cookie 后重试。
     """
 
     fetched_at = datetime.now(timezone.utc)
@@ -117,7 +118,8 @@ def fetch_all_ranking(
                 payload = None
             code = payload.get("code") if isinstance(payload, Mapping) else None
 
-            if code == _RISK_CONTROL_CODE:
+            # 风控也可能只回 412 + HTML（无 JSON 业务码），此时同样要刷 buvid 重试。
+            if code == _RISK_CONTROL_CODE or response.status_code == _RISK_CONTROL_STATUS:
                 # 最后一轮再刷新也没有消费者，其余轮次刷新 buvid 后重试。
                 if attempt < _RISK_CONTROL_ATTEMPTS - 1:
                     _refresh_buvid(
@@ -146,9 +148,7 @@ def fetch_all_ranking(
                 raise BilibiliAPIError("排行榜响应包含非对象记录")
             return RankingFetchResult(fetched_at=fetched_at, items=tuple(items))
 
-        raise BilibiliAPIError(
-            f"B站风控拦截（code={_RISK_CONTROL_CODE}），请稍后重试"
-        )
+        raise BilibiliAPIError("B站风控拦截（code=-352 或 HTTP 412），请稍后重试")
     except requests.RequestException as exc:
         raise BilibiliAPIError(f"排行榜请求失败：{exc}") from exc
     finally:
