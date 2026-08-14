@@ -5,7 +5,11 @@ from __future__ import annotations
 import unicodedata
 from dataclasses import dataclass
 from importlib.resources import files
-from importlib.resources.abc import Traversable
+
+try:
+    from importlib.abc import Traversable
+except ImportError:  # Python 3.10.0-3.10.11 等旧版本
+    from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Iterable
 
