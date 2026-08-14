@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Mapping
 
@@ -42,5 +43,11 @@ def render_wordcloud(
         prefer_horizontal=0.9,
     )
     cloud.generate_from_frequencies(dict(frequencies))
-    cloud.to_file(str(destination))
+    # 和 CSV 一样临时文件加 os.replace：写一半失败不会留下半截 PNG。
+    temporary = destination.with_name(f".{destination.name}.tmp")
+    try:
+        cloud.to_file(str(temporary))
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
     return destination.resolve()

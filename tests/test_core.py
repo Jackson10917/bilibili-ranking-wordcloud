@@ -11,6 +11,7 @@ import csv
 import json
 import sys
 import tempfile
+import types
 from pathlib import Path
 
 import requests
@@ -18,6 +19,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from bilibili_ranker.cleaner import TitleAnalyzer, deduplicate_records
+from bilibili_ranker.cli import main
 from bilibili_ranker.models import VideoRankingRecord, parse_ranking_records
 from bilibili_ranker.stopwords import load_stopword_policy
 from bilibili_ranker.storage import write_records_csv
@@ -389,6 +391,58 @@ def test_atomic_csv_write() -> None:
         assert leftovers == []
 
 
+def test_non_finite_timeout_rejected() -> None:
+    # nan/inf 都能通过 `<= 0`，inf 会在 socket.settimeout 抛 OverflowError 逸出错误处理。
+    for value in ("nan", "inf", "-inf", "0"):
+        try:
+            main(["--timeout", value])
+        except SystemExit as exc:
+            assert exc.code == 2, value
+        else:
+            raise AssertionError(f"--timeout {value} 应该被拒绝")
+
+
+def test_wordcloud_write_is_atomic() -> None:
+    # 渲染失败不能截断已有 PNG，也不能留下临时文件。
+    with tempfile.TemporaryDirectory() as directory:
+        destination = Path(directory) / "wc.png"
+        destination.write_bytes(b"old")
+
+        import bilibili_ranker.wordcloud as wordcloud_module
+
+        class _Boom:
+            def __init__(self, **_: object) -> None:
+                pass
+
+            def generate_from_frequencies(self, _: dict) -> None:
+                pass
+
+            def to_file(self, _: str) -> None:
+                raise OSError("disk full")
+
+        original = sys.modules.get("wordcloud")
+        sys.modules["wordcloud"] = types.SimpleNamespace(WordCloud=_Boom)
+        original_font = wordcloud_module.resolve_font_path
+        wordcloud_module.resolve_font_path = lambda _=None: Path("fake.ttf")
+        try:
+            try:
+                wordcloud_module.render_wordcloud({"词": 1}, destination)
+            except OSError:
+                pass
+            else:
+                raise AssertionError("应该抛出 OSError")
+        finally:
+            wordcloud_module.resolve_font_path = original_font
+            if original is None:
+                del sys.modules["wordcloud"]
+            else:
+                sys.modules["wordcloud"] = original
+
+        assert destination.read_bytes() == b"old"
+        leftovers = [p.name for p in Path(directory).iterdir() if p.name.endswith(".tmp")]
+        assert leftovers == []
+
+
 if __name__ == "__main__":
     test_stopword_policy()
     test_deduplicate_records()
@@ -408,4 +462,6 @@ if __name__ == "__main__":
     test_buvid_cookie_reaches_request_header()
     test_session_keeps_transient_retry_config()
     test_atomic_csv_write()
+    test_non_finite_timeout_rejected()
+    test_wordcloud_write_is_atomic()
     print("ok")

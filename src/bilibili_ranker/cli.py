@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any, Sequence
@@ -67,6 +68,8 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     frequencies = analyzer.analyze(accepted)
 
     write_records_csv(bundle.ranking_csv, accepted)
+    if not accepted:
+        print("警告：没有解析出任何有效记录，CSV 只有表头。", file=sys.stderr)
 
     generated_wordcloud: Path | None = None
     if frequencies:
@@ -94,8 +97,9 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.timeout <= 0:
-        parser.error("--timeout 必须大于 0")
+    # inf/nan 都能绕过 `<= 0`：inf 会让 socket.settimeout 抛 OverflowError 逸出错误处理。
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error("--timeout 必须是大于 0 的有限数")
     if args.width <= 0 or args.height <= 0 or args.max_words <= 0:
         parser.error("词云尺寸和最大词数必须大于 0")
     if args.minimum_token_length <= 0:

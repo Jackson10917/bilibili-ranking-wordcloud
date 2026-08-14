@@ -6,10 +6,10 @@ import unicodedata
 from dataclasses import dataclass
 from importlib.resources import files
 
-try:
-    from importlib.abc import Traversable
-except ImportError:  # importlib.abc.Traversable 3.12 起弃用，3.14 移除
+try:  # importlib.abc.Traversable 3.12 起弃用、3.14 移除，优先用新位置
     from importlib.resources.abc import Traversable
+except ImportError:  # Python 3.10
+    from importlib.abc import Traversable
 from pathlib import Path
 from typing import Iterable
 
