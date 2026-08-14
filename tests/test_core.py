@@ -102,6 +102,61 @@ def test_math_symbols_not_merged_into_tokens() -> None:
     assert analyzer.analyze([record]) == {"魔方": 1}
 
 
+def test_symbols_inside_cjk_and_cyrillic_blocks_dropped() -> None:
+    # 日文、西里尔按整块匹配，块内符号（・U+30FB、҂U+0482）不能被当成词元。
+    analyzer = TitleAnalyzer(load_stopword_policy())
+    record = VideoRankingRecord.from_api_item(
+        {"bvid": "BV1aa", "title": "・・ ҂҂ ゲーム"}, rank=1
+    )
+    assert analyzer.analyze([record]) == {"ゲーム": 1}
+
+
+def test_extended_latin_and_hangul_jamo_tokens() -> None:
+    # ẞ 在 Latin Extended Additional，casefold 后为 strasse，不能被截成 stra。
+    # ㅋ 经 NFKC 折叠到 Hangul Jamo 区，正则必须覆盖该区间。
+    analyzer = TitleAnalyzer(load_stopword_policy())
+    record = VideoRankingRecord.from_api_item(
+        {"bvid": "BV1aa", "title": "STRAẞE ㅋㅋㅋ"}, rank=1
+    )
+    assert analyzer.analyze([record]) == {"strasse": 1, "ᄏᄏᄏ": 1}
+
+
+def test_apostrophe_stopwords_filtered_whole() -> None:
+    # 撇号是词内连接符，否则 ain't 会退化成噪声词 ain、quelqu'un 退化成 quelqu。
+    analyzer = TitleAnalyzer(load_stopword_policy())
+    record = VideoRankingRecord.from_api_item(
+        {"bvid": "BV1aa", "title": "ain't quelqu'un 魔方"}, rank=1
+    )
+    assert analyzer.analyze([record]) == {"魔方": 1}
+
+
+def test_non_string_fields_rejected() -> None:
+    # bvid/title 是 list、dict 时不能被 str() 伪造成有效记录。
+    items = [
+        {"bvid": ["BV1xx"], "title": "t1"},
+        {"bvid": "BV1aa", "title": {"bad": "title"}},
+        {"bvid": "BV1bb", "title": 12345},
+        {"bvid": "BV1cc", "title": "t4"},
+    ]
+    records, rejected = parse_ranking_records(items)
+    assert rejected == 3
+    assert [r.bvid for r in records] == ["BV1cc"]
+
+
+def test_csv_formula_prefix_escaped() -> None:
+    # 标题是投稿者可控内容，Excel 会把 = + - @ 开头的单元格当公式求值。
+    record = VideoRankingRecord.from_api_item(
+        {"bvid": "BV1aa", "title": "=1+1", "owner": {"name": "@up"}}, rank=1
+    )
+    with tempfile.TemporaryDirectory() as directory:
+        destination = Path(directory) / "out.csv"
+        write_records_csv(destination, [record])
+        with destination.open(encoding="utf-8-sig", newline="") as stream:
+            rows = list(csv.DictReader(stream))
+    assert rows[0]["视频标题"] == "'=1+1"
+    assert rows[0]["UP主"] == "'@up"
+
+
 def _fake_json_response(payload: dict, status_code: int = 200) -> requests.Response:
     response = requests.Response()
     response.status_code = status_code
@@ -168,6 +223,27 @@ def test_fetch_raises_when_risk_control_persists() -> None:
     assert spi_calls == 1  # 只在第 1 轮后刷新一次
 
 
+def test_fetch_survives_malformed_buvid() -> None:
+    # SPI 返回非字符串 cookie 值时不能让 cookies.set() 的 AttributeError 逸出，
+    # 必须仍收敛成 BilibiliAPIError，由 CLI 统一转成退出码 1。
+    from unittest.mock import patch
+
+    from bilibili_ranker.client import BilibiliAPIError, SPI_API_URL, fetch_all_ranking
+
+    def fake_get(self: requests.Session, url: str, **kwargs: object) -> requests.Response:
+        if url == SPI_API_URL:
+            return _fake_json_response({"code": 0, "data": {"b_3": ["bad"], "b_4": "ok"}})
+        return _fake_json_response({"code": -352, "message": "-352"}, 412)
+
+    with patch.object(requests.Session, "get", fake_get):
+        try:
+            fetch_all_ranking()
+        except BilibiliAPIError as exc:
+            assert "风控" in str(exc)
+        else:
+            raise AssertionError("畸形 buvid 未收敛成 BilibiliAPIError")
+
+
 def test_fetch_reports_http_error() -> None:
     # 非风控的 HTTP 错误仍要抛错，不能因为先读响应体而被吞掉。
     from unittest.mock import patch
@@ -210,8 +286,14 @@ if __name__ == "__main__":
     test_parse_ranking_records_tolerance()
     test_accented_latin_tokens()
     test_math_symbols_not_merged_into_tokens()
+    test_symbols_inside_cjk_and_cyrillic_blocks_dropped()
+    test_extended_latin_and_hangul_jamo_tokens()
+    test_apostrophe_stopwords_filtered_whole()
+    test_non_string_fields_rejected()
+    test_csv_formula_prefix_escaped()
     test_fetch_retries_risk_control()
     test_fetch_raises_when_risk_control_persists()
+    test_fetch_survives_malformed_buvid()
     test_fetch_reports_http_error()
     test_atomic_csv_write()
     print("ok")

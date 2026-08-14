@@ -15,7 +15,9 @@ def _mapping(value: Any) -> Mapping[str, Any]:
 
 
 def _text(value: Any) -> str:
-    return str(value or "").strip()
+    """只接受字符串。list/dict 经 str() 会变成 "['BV1xx']" 这种垃圾字段，直接判空。"""
+
+    return value.strip() if isinstance(value, str) else ""
 
 
 def _optional_int(value: Any) -> int | None:

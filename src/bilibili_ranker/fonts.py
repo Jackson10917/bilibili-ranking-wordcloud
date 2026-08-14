@@ -45,6 +45,11 @@ def _standard_font_roots() -> Iterable[Path]:
     if windows_dir:
         yield Path(windows_dir) / "Fonts"
 
+    # Windows 字体右键「为我安装」只写用户目录，全局 Fonts 里看不到。
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if local_appdata:
+        yield Path(local_appdata) / "Microsoft" / "Windows" / "Fonts"
+
     yield Path("/System/Library/Fonts")
     yield Path("/Library/Fonts")
     yield Path.home() / "Library/Fonts"

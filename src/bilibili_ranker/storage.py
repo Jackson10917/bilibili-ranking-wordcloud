@@ -61,6 +61,9 @@ def _atomic_csv_write(
     return destination
 
 
+# Excel/LibreOffice 会把以这些字符开头的单元格当公式求值（CSV 注入）。
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
 RANKING_CSV_HEADERS = (
     "排名",
     "BV号",
@@ -81,15 +84,21 @@ RANKING_CSV_HEADERS = (
 )
 
 
+def _spreadsheet_safe(value: str) -> str:
+    """给公式前缀加单引号，避免 Excel 把用户投稿的标题当公式求值。"""
+
+    return "'" + value if value[:1] in _FORMULA_PREFIXES else value
+
+
 def _record_to_csv_row(record: VideoRankingRecord) -> dict[str, Any]:
     return {
         "排名": record.rank,
         "BV号": record.bvid,
         "视频链接": record.video_url,
-        "视频标题": record.title,
+        "视频标题": _spreadsheet_safe(record.title),
         "视频分区": record.category_v2_name or record.category_name,
         "主分区": record.parent_category_v2_name,
-        "UP主": record.uploader_name,
+        "UP主": _spreadsheet_safe(record.uploader_name),
         "发布时间（北京时间）": record.published_at,
         "视频时长（秒）": record.duration_seconds,
         "播放量": record.view_count,

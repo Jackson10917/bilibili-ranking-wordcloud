@@ -59,7 +59,8 @@ def _refresh_buvid(
         return
     b_3 = data.get("b_3")
     b_4 = data.get("b_4")
-    if not b_3 or not b_4:
+    # 必须查类型：非字符串会让 cookies.set() 抛 AttributeError 逸出 CLI 的错误处理。
+    if not isinstance(b_3, str) or not isinstance(b_4, str) or not b_3 or not b_4:
         return
     session.cookies.set("buvid3", b_3, domain=".bilibili.com")
     session.cookies.set("buvid4", b_4, domain=".bilibili.com")

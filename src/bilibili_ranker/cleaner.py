@@ -13,19 +13,27 @@ from .models import VideoRankingRecord
 from .stopwords import StopwordPolicy, normalize_token
 
 
+# jieba 首次分词会往 stderr 打 "Building prefix dict ..."，对 CLI 输出是纯噪音。
+jieba.setLogLevel("ERROR")
+
+
 _CJK_RANGE = r"\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U000323af"
 
 # 拉丁字母词元包含重音字符（café、déjà），否则会被拆成单字母碎片。
 # 区间挖掉 ×(U+00D7) 和 ÷(U+00F7)：它们是数学符号，不是字母（XML NameChar 经典区间）。
-_LATIN_LETTERS = r"A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u024f"
-_LATIN_ALNUM = r"A-Za-z0-9\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u024f"
+# 补上 Latin Extended Additional（U+1E00-U+1EFF，含 ẞ 和越南语声调字母），整段都是字母。
+_LATIN_LETTERS = r"A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u024f\u1e00-\u1eff"
+_LATIN_ALNUM = r"A-Za-z0-9\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u024f\u1e00-\u1eff"
 
+# 撇号是词内连接符：ain't、quelqu'un 必须整体成词，否则停用词表命中不了，
+# 反而留下 ain、quelqu 这类噪声。U+2019 不被 NFKC 折叠成 U+0027，两个都要列。
 _CHUNK_PATTERN = re.compile(
-    rf"[{_LATIN_LETTERS}][{_LATIN_ALNUM}]*(?:[._-][{_LATIN_ALNUM}]+)*(?:\+\+|#)?"
+    rf"[{_LATIN_LETTERS}][{_LATIN_ALNUM}]*(?:['\u2019._-][{_LATIN_ALNUM}]+)*(?:\+\+|#)?"
     rf"|\d+[{_LATIN_LETTERS}][{_LATIN_ALNUM}]*"
     rf"|[{_CJK_RANGE}]+"
     r"|[\u3040-\u30ff\u31f0-\u31ff]+"
-    r"|[\uac00-\ud7af]+"
+    # NFKC 会把兼容型谚文字母（ㅋ U+314B）折叠到 Hangul Jamo 区，所以两段都要收。
+    r"|[\u1100-\u11ff\uac00-\ud7af]+"
     r"|[\u0400-\u04ff]+"
     r"|\d+(?:\.\d+)?"
 )
@@ -92,6 +100,10 @@ class TitleAnalyzer:
         if token in self._policy.allowlist:
             return token
         if _NUMBER_PATTERN.fullmatch(token):
+            return None
+        # 日文、西里尔按整块匹配，块内混着符号（・U+30FB、҂U+0482）。
+        # 逐块手挖区间会漏，直接要求词元至少含一个字母。
+        if not any(character.isalpha() for character in token):
             return None
         if len(token) < self._minimum_token_length:
             return None

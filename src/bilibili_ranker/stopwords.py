@@ -8,7 +8,7 @@ from importlib.resources import files
 
 try:
     from importlib.abc import Traversable
-except ImportError:  # Python 3.12+ 已从 importlib.abc 移除 Traversable
+except ImportError:  # importlib.abc.Traversable 3.12 起弃用，3.14 移除
     from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Iterable
