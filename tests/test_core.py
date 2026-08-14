@@ -588,8 +588,14 @@ def test_stopword_errors_surface_before_network() -> None:
 
 
 if __name__ == "__main__":
+    import pytest as _pytest
+
     # 动态收集，避免手工罗列漏掉新测试导致静默漏跑。
+    # pytest.skip() 抛 _pytest.outcomes.Skipped，不捕获会中断循环导致后续测试静默漏跑。
     for _name, _function in sorted(globals().items()):
         if _name.startswith("test_") and callable(_function):
-            _function()
+            try:
+                _function()
+            except _pytest.skip.Exception as _e:
+                print(f"SKIP {_name}: {_e}")
     print("ok")

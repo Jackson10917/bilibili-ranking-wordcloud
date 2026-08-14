@@ -101,6 +101,7 @@ def fetch_all_ranking(
     fetched_at = datetime.now(timezone.utc)
     session = build_session()
     try:
+        last_response: requests.Response | None = None
         for attempt in range(_RISK_CONTROL_ATTEMPTS):
             response = session.get(
                 RANKING_API_URL,
@@ -120,8 +121,9 @@ def fetch_all_ranking(
             code = payload.get("code") if isinstance(payload, Mapping) else None
 
             # 风控也可能只回 412 + HTML（无 JSON 业务码），此时同样要刷 buvid 重试。
-            # 但 412 带了业务码就按业务码判：代理/CDN 的 412 不该把真实错误码盖成"风控"，
-            # 更不该把 code=0 的有效响应整个丢掉。
+            # 但 412 带了业务码就按业务码判：代理/CDN 的 412 不该把真实错误码盖成"风控"。
+            # （412 + code=0 会被 raise_for_status 作为 HTTP 错误上报，至少保留了真实状态码。）
+            last_response = response
             if code == _RISK_CONTROL_CODE or (
                 response.status_code == _RISK_CONTROL_STATUS and code is None
             ):
@@ -156,7 +158,12 @@ def fetch_all_ranking(
                 raise BilibiliAPIError("排行榜响应包含非对象记录")
             return RankingFetchResult(fetched_at=fetched_at, items=tuple(items))
 
-        raise BilibiliAPIError("B站风控拦截（code=-352 或 HTTP 412），请稍后重试")
+        # 附上最后一轮的诊断信息：非风控 412（代理/CDN 错误页）至少留下可排查线索。
+        _diag = ""
+        if last_response is not None:
+            _body = last_response.text[:200].replace("\n", " ")
+            _diag = f"（最后响应：HTTP {last_response.status_code}，body={_body!r}）"
+        raise BilibiliAPIError(f"B站风控拦截（code=-352 或 HTTP 412），请稍后重试{_diag}")
     except requests.RequestException as exc:
         raise BilibiliAPIError(f"排行榜请求失败：{exc}") from exc
     finally:

@@ -65,7 +65,7 @@ def _atomic_csv_write(
 
 # Excel/LibreOffice 会把以这些字符开头的单元格当公式求值（CSV 注入）。
 # Tab 和 CR 也在列：Excel 会先剥掉它们，露出后面的 = 继续当公式。
-# 只需转义投稿者可控字段（标题、UP 主名）；分区名是官方枚举，不在信任边界外。
+# 所有来自 API 响应的字符串字段统一转义，不区分"官方枚举"与"用户可控"。
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 RANKING_CSV_HEADERS = (
@@ -100,8 +100,8 @@ def _record_to_csv_row(record: VideoRankingRecord) -> dict[str, Any]:
         "BV号": record.bvid,
         "视频链接": record.video_url,
         "视频标题": _spreadsheet_safe(record.title),
-        "视频分区": record.category_v2_name or record.category_name,
-        "主分区": record.parent_category_v2_name,
+        "视频分区": _spreadsheet_safe(record.category_v2_name or record.category_name),
+        "主分区": _spreadsheet_safe(record.parent_category_v2_name),
         "UP主": _spreadsheet_safe(record.uploader_name),
         "发布时间（北京时间）": record.published_at,
         "视频时长（秒）": record.duration_seconds,

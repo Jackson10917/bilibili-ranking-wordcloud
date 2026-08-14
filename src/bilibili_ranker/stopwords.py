@@ -60,7 +60,9 @@ def load_stopword_policy(
     if isinstance(languages, str):
         raise TypeError("languages 必须是语言代码的可迭代对象，不能是字符串")
 
-    language_codes = tuple(dict.fromkeys(code.strip() for code in languages if code.strip()))
+    language_codes = tuple(
+        dict.fromkeys(code.strip() for code in languages if isinstance(code, str) and code.strip())
+    )
     unsupported = [code for code in language_codes if not has_lang(code)]
     if unsupported:
         raise ValueError(f"stopwordsiso 不支持这些语言：{', '.join(unsupported)}")
