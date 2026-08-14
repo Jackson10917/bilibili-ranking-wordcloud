@@ -262,6 +262,115 @@ def test_fetch_reports_http_error() -> None:
             raise AssertionError("HTTP 503 未抛出 BilibiliAPIError")
 
 
+def test_fetch_over_real_http_sends_buvid_cookie() -> None:
+    """走完整 requests 发送链路：mock Session.get 的测试测不出 cookie domain 写错。
+
+    domain 配成 `.example.com` 时 cookie jar 里照样能查到，但请求头不会带上；
+    只有真实 prepare_request 才能抓到。同时锁死 412+(-352) 能到达业务分支。
+    """
+
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from bilibili_ranker import client as client_module
+
+    seen_cookie_headers: list[str | None] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args: object) -> None:
+            pass
+
+        def do_GET(self) -> None:
+            if self.path.startswith("/spi"):
+                body, status = {"code": 0, "data": {"b_3": "b3", "b_4": "b4"}}, 200
+            else:
+                seen_cookie_headers.append(self.headers.get("Cookie"))
+                if len(seen_cookie_headers) == 1:
+                    body, status = {"code": -352, "message": "risk"}, 412
+                else:
+                    body, status = (
+                        {"code": 0, "data": {"list": [{"bvid": "BV1aa", "title": "标题"}]}},
+                        200,
+                    )
+            payload = json.dumps(body).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    host, port = server.server_address[0], server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    original_ranking = client_module.RANKING_API_URL
+    original_spi = client_module.SPI_API_URL
+    try:
+        client_module.RANKING_API_URL = f"http://{host}:{port}/ranking"
+        client_module.SPI_API_URL = f"http://{host}:{port}/spi"
+        result = client_module.fetch_all_ranking(timeout_seconds=5.0)
+    finally:
+        client_module.RANKING_API_URL = original_ranking
+        client_module.SPI_API_URL = original_spi
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert [item["bvid"] for item in result.items] == ["BV1aa"]
+    # 412 的响应体确实交回业务代码，-352 分支可达并触发了第二轮请求。
+    assert len(seen_cookie_headers) == 2
+
+
+def test_buvid_cookie_reaches_request_header() -> None:
+    """cookie jar 有值不等于请求头带上了：domain 写错时 get_dict() 照样能查到。
+
+    这里走 requests 真实的 prepare_request，把 domain 正确性锁死。
+    """
+
+    import re
+    from unittest.mock import patch
+
+    from bilibili_ranker.client import (
+        RANKING_API_URL,
+        SPI_API_URL,
+        _refresh_buvid,
+        build_session,
+    )
+
+    def fake_get(self: requests.Session, url: str, **kwargs: object) -> requests.Response:
+        assert url == SPI_API_URL
+        return _fake_json_response({"code": 0, "data": {"b_3": "b3", "b_4": "b4"}})
+
+    session = build_session()
+    try:
+        with patch.object(requests.Session, "get", fake_get):
+            _refresh_buvid(session, user_agent="ua", timeout_seconds=5.0)
+        prepared = session.prepare_request(requests.Request("GET", RANKING_API_URL))
+    finally:
+        session.close()
+
+    header = prepared.headers.get("Cookie") or ""
+    assert re.search(r"\bbuvid3=b3\b", header), header
+    assert re.search(r"\bbuvid4=b4\b", header), header
+
+
+def test_session_keeps_transient_retry_config() -> None:
+    # 删掉 HTTPAdapter/Retry 配置时，纯 mock 测试不会有任何反应，这里直接断言。
+    from urllib3.util.retry import Retry
+
+    from bilibili_ranker.client import build_session
+
+    session = build_session()
+    try:
+        retries = session.get_adapter("https://api.bilibili.com/").max_retries
+    finally:
+        session.close()
+    assert isinstance(retries, Retry)
+    assert retries.total == 2
+    assert set(retries.status_forcelist or ()) == {429, 500, 502, 503, 504}
+
+
 def test_atomic_csv_write() -> None:
     record = VideoRankingRecord.from_api_item(
         {"bvid": "BV1aa", "title": "标题", "owner": {}, "stat": {}},
@@ -295,5 +404,8 @@ if __name__ == "__main__":
     test_fetch_raises_when_risk_control_persists()
     test_fetch_survives_malformed_buvid()
     test_fetch_reports_http_error()
+    test_fetch_over_real_http_sends_buvid_cookie()
+    test_buvid_cookie_reaches_request_header()
+    test_session_keeps_transient_retry_config()
     test_atomic_csv_write()
     print("ok")

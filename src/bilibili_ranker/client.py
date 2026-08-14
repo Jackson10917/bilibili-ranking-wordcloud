@@ -30,6 +30,22 @@ class RankingFetchResult:
     items: tuple[Mapping[str, Any], ...]
 
 
+def build_session() -> requests.Session:
+    """带瞬时故障重试的会话；单独成函数便于测试直接断言 Retry 配置。"""
+
+    session = requests.Session()
+    adapter = HTTPAdapter(
+        max_retries=Retry(
+            total=2,
+            backoff_factor=0.5,
+            status_forcelist=(429, 500, 502, 503, 504),
+        )
+    )
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
 def _refresh_buvid(
     session: requests.Session,
     *,
@@ -81,17 +97,7 @@ def fetch_all_ranking(
     """
 
     fetched_at = datetime.now(timezone.utc)
-    session = requests.Session()
-    session.mount(
-        "https://",
-        HTTPAdapter(
-            max_retries=Retry(
-                total=2,
-                backoff_factor=0.5,
-                status_forcelist=(429, 500, 502, 503, 504),
-            )
-        ),
-    )
+    session = build_session()
     try:
         for attempt in range(_RISK_CONTROL_ATTEMPTS):
             response = session.get(
