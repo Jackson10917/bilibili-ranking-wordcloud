@@ -13,7 +13,6 @@ except ImportError:  # Python 3.10
 from pathlib import Path
 from typing import Iterable
 
-
 DEFAULT_LANGUAGES = ("zh", "en", "ja", "ko", "fr", "de", "es", "ru")
 
 
@@ -53,7 +52,8 @@ def load_stopword_policy(
     """加载 MIT 许可的 stopwordsiso，并叠加本项目规则。"""
 
     try:
-        from stopwordsiso import has_lang, stopwords as iso_stopwords
+        from stopwordsiso import has_lang
+        from stopwordsiso import stopwords as iso_stopwords
     except ImportError as exc:
         raise RuntimeError("缺少 stopwordsiso，请先安装项目依赖") from exc
 

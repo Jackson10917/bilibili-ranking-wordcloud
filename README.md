@@ -80,7 +80,8 @@ python -m bilibili_ranker --output-dir output
 
 ```
 --output-dir PATH              输出目录，默认 output
---resource-dir PATH            覆盖内置停用词资源目录
+--resource-dir PATH            覆盖内置停用词资源目录，该目录必须同时包含
+                               custom_stopwords.txt 和 allowlist.txt，缺任一个直接报错退出
 --font-path PATH               指定 TTF、TTC 或 OTF 字体
 --languages zh,en,ja,ko        指定停用词语言
 --minimum-token-length 2       普通词最短长度

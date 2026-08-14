@@ -52,6 +52,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
+    # 先加载停用词：不依赖网络，让 --languages/--resource-dir 的错误在发请求前就报出来，
+    # 而不是抓完整个榜单再抛异常、CSV 一个字节都不落盘。
+    policy = load_stopword_policy(args.resource_dir, languages=args.languages)
+
     fetched = fetch_all_ranking(timeout_seconds=args.timeout)
 
     bundle = create_output_bundle(args.output_dir, fetched.fetched_at)
@@ -60,7 +64,6 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     accepted, duplicate_rejected_count = deduplicate_records(records)
     rejected_count = parse_rejected_count + duplicate_rejected_count
 
-    policy = load_stopword_policy(args.resource_dir, languages=args.languages)
     analyzer = TitleAnalyzer(
         policy,
         minimum_token_length=args.minimum_token_length,

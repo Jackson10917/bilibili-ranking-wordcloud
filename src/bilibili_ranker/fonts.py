@@ -117,11 +117,14 @@ def resolve_font_path(explicit: str | Path | None = None) -> Path:
             if direct.is_file():
                 return direct.resolve()
         try:
-            matches = {
-                path.name: path
-                for path in root.rglob("*")
-                if path.is_file() and path.name in _CANDIDATE_FILES
-            }
+            matches: dict[str, Path] = {}
+            for path in root.rglob("*"):
+                # 同名字体取排序最小的路径：rglob 顺序依赖文件系统，不排序两台机器可能选到
+                # 不同字体，词云就不可复现（渲染另有 random_state=42）。
+                if path.name in _CANDIDATE_FILES and path.is_file():
+                    existing = matches.get(path.name)
+                    if existing is None or str(path) < str(existing):
+                        matches[path.name] = path
         except OSError:
             continue
         for filename in _CANDIDATE_FILES:

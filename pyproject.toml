@@ -22,12 +22,15 @@ bilibili-rank = "bilibili_ranker.cli:main"
 
 [project.optional-dependencies]
 test = ["pytest>=7,<9"]
+lint = ["ruff==0.16.3"]
 
 [tool.ruff]
 target-version = "py310"
+line-length = 100
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F"]
+# 补上 W（尾随空格等）和 I（import 顺序）；E4/E7/E9/F 只管逻辑错误，格式类问题无人看管。
+select = ["E4", "E7", "E9", "F", "W", "I"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

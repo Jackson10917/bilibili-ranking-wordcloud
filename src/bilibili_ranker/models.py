@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 _CN_TIMEZONE = timezone(timedelta(hours=8))
+
+# bvid 直接拼进 video_url、也裸写进 CSV 的 BV号 列。校验格式，脏值就不会经这两列外流。
+_BVID_PATTERN = re.compile(r"BV[0-9A-Za-z]{10}")
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
@@ -21,7 +25,8 @@ def _text(value: Any) -> str:
 
 
 def _optional_int(value: Any) -> int | None:
-    if value is None or value == "":
+    # bool 是 int 子类，True 会被静默解析成播放量 1，而不是判为脏数据。
+    if value is None or value == "" or isinstance(value, bool):
         return None
     if isinstance(value, float) and not value.is_integer():
         return None
@@ -73,8 +78,8 @@ class VideoRankingRecord:
     ) -> "VideoRankingRecord":
         bvid = _text(item.get("bvid"))
         title = _text(item.get("title"))
-        if not bvid:
-            raise ValueError("缺少 bvid")
+        if not _BVID_PATTERN.fullmatch(bvid):
+            raise ValueError("bvid 格式非法")
         if not title:
             raise ValueError("缺少标题")
 

@@ -49,33 +49,34 @@ def test_stopword_policy() -> None:
 def test_deduplicate_records() -> None:
     # BV 号 base58 大小写敏感，仅按完整字符串精确去重，不依赖 rank 值。
     items = [
-        {"bvid": "BV1aa", "title": "t1", "owner": {}, "stat": {}},
-        {"bvid": "BV1aa", "title": "t2", "owner": {}, "stat": {}},  # 重复项
-        {"bvid": "bv1aa", "title": "t3", "owner": {}, "stat": {}},  # 大小写不同，不同视频
-        {"bvid": "BV1bb", "title": "t4", "owner": {}, "stat": {}},
+        {"bvid": "BV1aa0000000", "title": "t1", "owner": {}, "stat": {}},
+        {"bvid": "BV1aa0000000", "title": "t2", "owner": {}, "stat": {}},  # 重复项
+        # 大小写不同是不同视频；BV 前缀本身大小写敏感，bv... 不是合法 bvid。
+        {"bvid": "BV1Aa0000000", "title": "t3", "owner": {}, "stat": {}},
+        {"bvid": "BV1bb0000000", "title": "t4", "owner": {}, "stat": {}},
     ]
     records, _ = parse_ranking_records(items)
     accepted, rejected = deduplicate_records(records)
     assert rejected == 1
-    assert [r.bvid for r in accepted] == ["BV1aa", "bv1aa", "BV1bb"]
+    assert [r.bvid for r in accepted] == ["BV1aa0000000", "BV1Aa0000000", "BV1bb0000000"]
 
 
 def test_parse_ranking_records_tolerance() -> None:
     items = [
-        {"bvid": "BV1aa", "title": "t1", "owner": {}, "stat": {}},
+        {"bvid": "BV1aa0000000", "title": "t1", "owner": {}, "stat": {}},
         {"bvid": "", "title": "t2", "owner": {}, "stat": {}},  # 缺 bvid，拒绝
-        {"bvid": "BV1bb", "title": "", "owner": {}, "stat": {}},  # 缺标题，拒绝
+        {"bvid": "BV1bb0000000", "title": "", "owner": {}, "stat": {}},  # 缺标题，拒绝
         {
-            "bvid": "BV1cc",
+            "bvid": "BV1cc0000000",
             "title": "t4",
             "owner": {},
             "stat": {"view": "123", "danmaku": "-1", "reply": "1.9"},
         },
-        {"bvid": "BV1dd", "title": "t5", "owner": {}, "stat": {"view": 1.9, "coin": 2.0}},
+        {"bvid": "BV1dd0000000", "title": "t5", "owner": {}, "stat": {"view": 1.9, "coin": 2.0}},
     ]
     records, rejected = parse_ranking_records(items)
     assert rejected == 2
-    assert [r.bvid for r in records] == ["BV1aa", "BV1cc", "BV1dd"]
+    assert [r.bvid for r in records] == ["BV1aa0000000", "BV1cc0000000", "BV1dd0000000"]
 
     # 整数文本正常解析，负数与小数文本拒绝。
     assert records[1].view_count == 123
@@ -90,7 +91,7 @@ def test_accented_latin_tokens() -> None:
     # 重音字母必须与相邻拉丁字母组成同一词元，而不是被拆成单字母碎片。
     analyzer = TitleAnalyzer(load_stopword_policy())
     record = VideoRankingRecord.from_api_item(
-        {"bvid": "BV1aa", "title": "déjà vu café"}, rank=1
+        {"bvid": "BV1aa0000000", "title": "déjà vu café"}, rank=1
     )
     assert analyzer.analyze([record]) == {"café": 1, "déjà": 1}
 
@@ -99,7 +100,7 @@ def test_math_symbols_not_merged_into_tokens() -> None:
     # ×(U+00D7)/÷(U+00F7) 是数学符号而非字母，不能与相邻字符拼成词元。
     analyzer = TitleAnalyzer(load_stopword_policy())
     record = VideoRankingRecord.from_api_item(
-        {"bvid": "BV1aa", "title": "5×5 魔方 ××× 6÷2"}, rank=1
+        {"bvid": "BV1aa0000000", "title": "5×5 魔方 ××× 6÷2"}, rank=1
     )
     assert analyzer.analyze([record]) == {"魔方": 1}
 
@@ -108,7 +109,7 @@ def test_symbols_inside_cjk_and_cyrillic_blocks_dropped() -> None:
     # 日文、西里尔按整块匹配，块内符号（・U+30FB、҂U+0482）不能被当成词元。
     analyzer = TitleAnalyzer(load_stopword_policy())
     record = VideoRankingRecord.from_api_item(
-        {"bvid": "BV1aa", "title": "・・ ҂҂ ゲーム"}, rank=1
+        {"bvid": "BV1aa0000000", "title": "・・ ҂҂ ゲーム"}, rank=1
     )
     assert analyzer.analyze([record]) == {"ゲーム": 1}
 
@@ -118,7 +119,7 @@ def test_extended_latin_and_hangul_jamo_tokens() -> None:
     # ㅋ 经 NFKC 折叠到 Hangul Jamo 区，正则必须覆盖该区间。
     analyzer = TitleAnalyzer(load_stopword_policy())
     record = VideoRankingRecord.from_api_item(
-        {"bvid": "BV1aa", "title": "STRAẞE ㅋㅋㅋ"}, rank=1
+        {"bvid": "BV1aa0000000", "title": "STRAẞE ㅋㅋㅋ"}, rank=1
     )
     assert analyzer.analyze([record]) == {"strasse": 1, "ᄏᄏᄏ": 1}
 
@@ -127,7 +128,7 @@ def test_apostrophe_stopwords_filtered_whole() -> None:
     # 撇号是词内连接符，否则 ain't 会退化成噪声词 ain、quelqu'un 退化成 quelqu。
     analyzer = TitleAnalyzer(load_stopword_policy())
     record = VideoRankingRecord.from_api_item(
-        {"bvid": "BV1aa", "title": "ain't quelqu'un 魔方"}, rank=1
+        {"bvid": "BV1aa0000000", "title": "ain't quelqu'un 魔方"}, rank=1
     )
     assert analyzer.analyze([record]) == {"魔方": 1}
 
@@ -135,20 +136,20 @@ def test_apostrophe_stopwords_filtered_whole() -> None:
 def test_non_string_fields_rejected() -> None:
     # bvid/title 是 list、dict 时不能被 str() 伪造成有效记录。
     items = [
-        {"bvid": ["BV1xx"], "title": "t1"},
-        {"bvid": "BV1aa", "title": {"bad": "title"}},
-        {"bvid": "BV1bb", "title": 12345},
-        {"bvid": "BV1cc", "title": "t4"},
+        {"bvid": ["BV1xx0000000"], "title": "t1"},
+        {"bvid": "BV1aa0000000", "title": {"bad": "title"}},
+        {"bvid": "BV1bb0000000", "title": 12345},
+        {"bvid": "BV1cc0000000", "title": "t4"},
     ]
     records, rejected = parse_ranking_records(items)
     assert rejected == 3
-    assert [r.bvid for r in records] == ["BV1cc"]
+    assert [r.bvid for r in records] == ["BV1cc0000000"]
 
 
 def test_csv_formula_prefix_escaped() -> None:
     # 标题是投稿者可控内容，Excel 会把 = + - @ 开头的单元格当公式求值。
     record = VideoRankingRecord.from_api_item(
-        {"bvid": "BV1aa", "title": "=1+1", "owner": {"name": "@up"}}, rank=1
+        {"bvid": "BV1aa0000000", "title": "=1+1", "owner": {"name": "@up"}}, rank=1
     )
     with tempfile.TemporaryDirectory() as directory:
         destination = Path(directory) / "out.csv"
@@ -175,7 +176,7 @@ def test_fetch_retries_risk_control() -> None:
     # 风控拦截在真实环境伴随 HTTP 412，业务码只在响应体里。
     ranking_responses = [
         ({"code": -352, "message": "-352"}, 412),
-        ({"code": 0, "data": {"list": [{"bvid": "BV1aa", "title": "t"}]}}, 200),
+        ({"code": 0, "data": {"list": [{"bvid": "BV1aa0000000", "title": "t"}]}}, 200),
     ]
     spi_calls = 0
     retry_cookies: list[dict[str, str]] = []
@@ -192,7 +193,7 @@ def test_fetch_retries_risk_control() -> None:
     with patch.object(requests.Session, "get", fake_get):
         result = fetch_all_ranking()
 
-    assert [item["bvid"] for item in result.items] == ["BV1aa"]
+    assert [item["bvid"] for item in result.items] == ["BV1aa0000000"]
     assert spi_calls == 1  # 无前置刷新，成功后也不再刷
     assert retry_cookies == [
         {},
@@ -201,12 +202,14 @@ def test_fetch_retries_risk_control() -> None:
 
 
 def test_fetch_raises_when_risk_control_persists() -> None:
-    # 两轮都返回 -352 时抛出 BilibiliAPIError，且最后一轮不再空刷 buvid。
+    # 每轮都返回 -352 时抛出 BilibiliAPIError，且最后一轮不再空刷 buvid。
     from unittest.mock import patch
 
-    from bilibili_ranker.client import BilibiliAPIError, SPI_API_URL, fetch_all_ranking
+    from bilibili_ranker import client as client_module
+    from bilibili_ranker.client import SPI_API_URL, BilibiliAPIError, fetch_all_ranking
 
     spi_calls = 0
+    sleeps: list[float] = []
 
     def fake_get(self: requests.Session, url: str, **kwargs: object) -> requests.Response:
         nonlocal spi_calls
@@ -216,13 +219,17 @@ def test_fetch_raises_when_risk_control_persists() -> None:
         return _fake_json_response({"code": -352, "message": "-352"}, 412)
 
     with patch.object(requests.Session, "get", fake_get):
-        try:
-            fetch_all_ranking()
-        except BilibiliAPIError as exc:
-            assert "风控" in str(exc)
-        else:
-            raise AssertionError("两轮 -352 后未抛出 BilibiliAPIError")
-    assert spi_calls == 1  # 只在第 1 轮后刷新一次
+        with patch.object(client_module.time, "sleep", sleeps.append):
+            try:
+                fetch_all_ranking()
+            except BilibiliAPIError as exc:
+                assert "风控" in str(exc)
+            else:
+                raise AssertionError("持续 -352 后未抛出 BilibiliAPIError")
+    # 最后一轮不再空刷 buvid：刷新次数 = 总轮次 - 1。
+    assert spi_calls == client_module._RISK_CONTROL_ATTEMPTS - 1
+    # 首轮不等待（冷启动必吃一次 -352），之后递增退避，不能立刻连打风控接口。
+    assert sleeps == [1.0]
 
 
 def test_fetch_survives_malformed_buvid() -> None:
@@ -230,7 +237,7 @@ def test_fetch_survives_malformed_buvid() -> None:
     # 必须仍收敛成 BilibiliAPIError，由 CLI 统一转成退出码 1。
     from unittest.mock import patch
 
-    from bilibili_ranker.client import BilibiliAPIError, SPI_API_URL, fetch_all_ranking
+    from bilibili_ranker.client import SPI_API_URL, BilibiliAPIError, fetch_all_ranking
 
     def fake_get(self: requests.Session, url: str, **kwargs: object) -> requests.Response:
         if url == SPI_API_URL:
@@ -267,13 +274,13 @@ def test_fetch_retries_on_412_without_json_body() -> None:
             response._content = b"<html>risk control</html>"
             return response
         return _fake_json_response(
-            {"code": 0, "data": {"list": [{"bvid": "BV1aa", "title": "t"}]}}
+            {"code": 0, "data": {"list": [{"bvid": "BV1aa0000000", "title": "t"}]}}
         )
 
     with patch.object(requests.Session, "get", fake_get):
         result = fetch_all_ranking()
 
-    assert [item["bvid"] for item in result.items] == ["BV1aa"]
+    assert [item["bvid"] for item in result.items] == ["BV1aa0000000"]
     assert spi_calls == 1
     assert ranking_calls == 2
 
@@ -324,7 +331,7 @@ def test_fetch_over_real_http_retries_after_412() -> None:
                     body, status = {"code": -352, "message": "risk"}, 412
                 else:
                     body, status = (
-                        {"code": 0, "data": {"list": [{"bvid": "BV1aa", "title": "标题"}]}},
+                        {"code": 0, "data": {"list": [{"bvid": "BV1aa0000000", "title": "标题"}]}},
                         200,
                     )
             payload = json.dumps(body).encode("utf-8")
@@ -352,7 +359,7 @@ def test_fetch_over_real_http_retries_after_412() -> None:
         server.server_close()
         thread.join(timeout=5)
 
-    assert [item["bvid"] for item in result.items] == ["BV1aa"]
+    assert [item["bvid"] for item in result.items] == ["BV1aa0000000"]
     # 412 的响应体确实交回业务代码，-352 分支可达并触发了第二轮请求。
     assert len(ranking_calls) == 2
 
@@ -408,7 +415,7 @@ def test_session_keeps_transient_retry_config() -> None:
 
 def test_atomic_csv_write() -> None:
     record = VideoRankingRecord.from_api_item(
-        {"bvid": "BV1aa", "title": "标题", "owner": {}, "stat": {}},
+        {"bvid": "BV1aa0000000", "title": "标题", "owner": {}, "stat": {}},
         rank=1,
     )
     with tempfile.TemporaryDirectory() as directory:
@@ -417,7 +424,7 @@ def test_atomic_csv_write() -> None:
         with destination.open(encoding="utf-8-sig", newline="") as stream:
             rows = list(csv.DictReader(stream))
         assert len(rows) == 1
-        assert rows[0]["BV号"] == "BV1aa"
+        assert rows[0]["BV号"] == "BV1aa0000000"
         assert rows[0]["排名"] == "1"
         # 失败写入不留临时文件。
         leftovers = [p.name for p in Path(directory).iterdir() if p.name.endswith(".tmp")]
@@ -479,13 +486,17 @@ def test_wordcloud_write_is_atomic() -> None:
 def test_wordcloud_renders_real_png() -> None:
     # 走真实 WordCloud + PIL 保存路径：临时文件扩展名是 .tmp，PIL 推不出格式，
     # 必须显式 format="PNG"，否则整个词云功能 100% 失效。
+    import pytest
+
     from bilibili_ranker.fonts import resolve_font_path
     from bilibili_ranker.wordcloud import render_wordcloud
 
     try:
         resolve_font_path(None)
     except RuntimeError:
-        return  # 环境无 CJK 字体，跳过
+        # 必须 skip 而不是 return：静默通过的话，这条测试要防的"PNG 保存回归"在 CI 上
+        # 永远是绿的。CI 已装 fonts-noto-cjk，正常情况下不会走到这里。
+        pytest.skip("环境无 CJK 字体")
 
     with tempfile.TemporaryDirectory() as directory:
         destination = Path(directory) / "wc.png"
@@ -501,35 +512,84 @@ def test_japanese_kanji_word_survives_jieba() -> None:
     # 全单字时保留整块，日文汉字词才不会系统性丢失。
     analyzer = TitleAnalyzer(load_stopword_policy())
     record = VideoRankingRecord.from_api_item(
-        {"bvid": "BV1aa", "title": "ゲーム実況"}, rank=1
+        {"bvid": "BV1aa0000000", "title": "ゲーム実況"}, rank=1
     )
     frequencies = analyzer.analyze([record])
     assert "実況" in frequencies
     assert "ゲーム" in frequencies
 
 
+def test_chinese_function_word_runs_not_kept_whole() -> None:
+    """全单字回退分支必须只救日语，不能把中文虚词串整块放进词云。
+
+    「他也是」被 jieba 切成三个单字，逐字都是停用词而整块不是，不加判断就会绕过过滤。
+    反向случай：日语汉字词里个别汉字撞上中文停用词（自転車 的「自」、本気 的「本」）时
+    仍须保留，所以判据是"全部单字都是停用词"，而不是"存在停用词"。
+    """
+
+    analyzer = TitleAnalyzer(load_stopword_policy())
+
+    def tokens(title: str) -> dict[str, int]:
+        record = VideoRankingRecord.from_api_item({"bvid": "BV1aa0000000", "title": title}, rank=1)
+        return analyzer.analyze([record])
+
+    for noise in ("他也是", "我的了", "和你的", "也是的"):
+        assert noise not in tokens(noise), noise
+
+    for word in ("自転車", "本気", "実況"):
+        assert word in tokens(word), word
+
+
+def test_bvid_format_validated() -> None:
+    # bvid 拼进 video_url、也裸写进 CSV 的 BV号 列，脏值不能落盘。
+    items = [
+        {"bvid": "=cmd|'/c calc'!A", "title": "t1"},
+        {"bvid": "BV1aa", "title": "t2"},
+        {"bvid": "BV1aa0000000", "title": "t3"},
+    ]
+    records, rejected = parse_ranking_records(items)
+    assert rejected == 2
+    assert [r.bvid for r in records] == ["BV1aa0000000"]
+
+
+def test_412_with_business_code_not_treated_as_risk_control() -> None:
+    # 代理/CDN 也会回 412。带了业务码就按业务码判，否则真实错误被盖成"风控"，
+    # 极端情况下 412 + code=0 的有效响应会被整轮丢弃。
+    from unittest.mock import patch
+
+    from bilibili_ranker.client import SPI_API_URL, BilibiliAPIError, fetch_all_ranking
+
+    def fake_get(self: requests.Session, url: str, **kwargs: object) -> requests.Response:
+        if url == SPI_API_URL:
+            raise AssertionError("非风控的 412 不应触发 buvid 刷新")
+        return _fake_json_response({"code": -404, "message": "啥都木有"}, 412)
+
+    with patch.object(requests.Session, "get", fake_get):
+        try:
+            fetch_all_ranking()
+        except BilibiliAPIError as exc:
+            assert "412" in str(exc)  # 按 HTTP 错误上报，不再被误标成风控
+        else:
+            raise AssertionError("412 + code=-404 未抛出 BilibiliAPIError")
+
+
+def test_stopword_errors_surface_before_network() -> None:
+    # 语言代码打错时必须在发请求前就报错，而不是抓完整个榜单再抛异常、CSV 零落盘。
+    from unittest.mock import patch
+
+    import bilibili_ranker.cli as cli_module
+
+    def boom(**_: object) -> object:
+        raise AssertionError("参数错误时不应该发起网络请求")
+
+    with patch.object(cli_module, "fetch_all_ranking", boom):
+        # boom 的 AssertionError 不被 main 的 except 捕获，抓到网络请求就会直接冒出来。
+        assert main(["--languages", "zh,xx"]) == 1
+
+
 if __name__ == "__main__":
-    test_stopword_policy()
-    test_deduplicate_records()
-    test_parse_ranking_records_tolerance()
-    test_accented_latin_tokens()
-    test_math_symbols_not_merged_into_tokens()
-    test_symbols_inside_cjk_and_cyrillic_blocks_dropped()
-    test_extended_latin_and_hangul_jamo_tokens()
-    test_apostrophe_stopwords_filtered_whole()
-    test_non_string_fields_rejected()
-    test_csv_formula_prefix_escaped()
-    test_fetch_retries_risk_control()
-    test_fetch_raises_when_risk_control_persists()
-    test_fetch_survives_malformed_buvid()
-    test_fetch_reports_http_error()
-    test_fetch_retries_on_412_without_json_body()
-    test_fetch_over_real_http_retries_after_412()
-    test_buvid_cookie_reaches_request_header()
-    test_session_keeps_transient_retry_config()
-    test_atomic_csv_write()
-    test_non_finite_timeout_rejected()
-    test_wordcloud_write_is_atomic()
-    test_wordcloud_renders_real_png()
-    test_japanese_kanji_word_survives_jieba()
+    # 动态收集，避免手工罗列漏掉新测试导致静默漏跑。
+    for _name, _function in sorted(globals().items()):
+        if _name.startswith("test_") and callable(_function):
+            _function()
     print("ok")

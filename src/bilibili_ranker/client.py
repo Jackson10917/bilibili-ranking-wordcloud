@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -11,14 +12,14 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-
 RANKING_PAGE_URL = "https://www.bilibili.com/v/popular/rank/all"
 RANKING_API_URL = "https://api.bilibili.com/x/web-interface/ranking/v2"
 SPI_API_URL = "https://api.bilibili.com/x/frontend/finger/spi"
 
 _RISK_CONTROL_CODE = -352
 _RISK_CONTROL_STATUS = 412
-_RISK_CONTROL_ATTEMPTS = 2
+_RISK_CONTROL_ATTEMPTS = 3
+_RISK_CONTROL_BACKOFF_SECONDS = 1.0
 
 
 class BilibiliAPIError(RuntimeError):
@@ -119,7 +120,11 @@ def fetch_all_ranking(
             code = payload.get("code") if isinstance(payload, Mapping) else None
 
             # 风控也可能只回 412 + HTML（无 JSON 业务码），此时同样要刷 buvid 重试。
-            if code == _RISK_CONTROL_CODE or response.status_code == _RISK_CONTROL_STATUS:
+            # 但 412 带了业务码就按业务码判：代理/CDN 的 412 不该把真实错误码盖成"风控"，
+            # 更不该把 code=0 的有效响应整个丢掉。
+            if code == _RISK_CONTROL_CODE or (
+                response.status_code == _RISK_CONTROL_STATUS and code is None
+            ):
                 # 最后一轮再刷新也没有消费者，其余轮次刷新 buvid 后重试。
                 if attempt < _RISK_CONTROL_ATTEMPTS - 1:
                     _refresh_buvid(
@@ -127,6 +132,9 @@ def fetch_all_ranking(
                         user_agent=user_agent,
                         timeout_seconds=timeout_seconds,
                     )
+                    # 立刻二连会加重风控。首轮不等（冷启动必吃一次 -352），之后递增退避。
+                    if attempt > 0:
+                        time.sleep(_RISK_CONTROL_BACKOFF_SECONDS * attempt)
                 continue
 
             response.raise_for_status()

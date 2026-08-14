@@ -12,7 +12,6 @@ import jieba
 from .models import VideoRankingRecord
 from .stopwords import StopwordPolicy, normalize_token
 
-
 # jieba 首次分词会往 stderr 打 "Building prefix dict ..."，对 CLI 输出是纯噪音。
 jieba.setLogLevel("ERROR")
 
@@ -78,8 +77,7 @@ class TitleAnalyzer:
         self._policy = stopword_policy
         self._minimum_token_length = minimum_token_length
 
-    @staticmethod
-    def _candidate_tokens(title: str) -> list[str]:
+    def _candidate_tokens(self, title: str) -> list[str]:
         """提取文字词元；Emoji、标点和其他符号不会被模式匹配。"""
 
         normalized = normalize_title(title)
@@ -92,9 +90,16 @@ class TitleAnalyzer:
                 tokens.extend(pieces)
                 # jieba 只有中文词典，日文汉字词（実況、洗濯）会被全切成单字后被
                 # minimum_token_length 丢干净。全单字说明词典没命中，整块也留一份。
+                # 但中文虚词串（「他也是」「和你的」）同样会被切成全单字，整块会绕过
+                # 停用词过滤混进词云。全部单字都是停用词才判定为虚词串丢弃：
+                # 日语汉字词里就算有个别汉字撞上中文停用词（自転車 的「自」、本気 的
+                # 「本」），也不会整块都撞上。
                 # ponytail: 启发式；要精确切日语得上 mecab/UniDic 词典。
                 if len(chunk) > 1 and all(len(piece) == 1 for piece in pieces):
-                    tokens.append(chunk)
+                    if not all(
+                        normalize_token(piece) in self._policy.stopwords for piece in pieces
+                    ):
+                        tokens.append(chunk)
             else:
                 tokens.append(chunk)
         return tokens

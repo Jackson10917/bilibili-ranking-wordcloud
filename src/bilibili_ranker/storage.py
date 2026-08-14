@@ -42,7 +42,6 @@ def create_output_bundle(root: str | Path, fetched_at: datetime) -> OutputBundle
 def temporary_path(destination: Path) -> Path:
     """带 uuid 后缀的同目录临时路径；CSV 和 PNG 共用，避免并发互相踩踏。"""
 
-
     destination.parent.mkdir(parents=True, exist_ok=True)
     return destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
 
@@ -65,8 +64,9 @@ def _atomic_csv_write(
 
 
 # Excel/LibreOffice 会把以这些字符开头的单元格当公式求值（CSV 注入）。
+# Tab 和 CR 也在列：Excel 会先剥掉它们，露出后面的 = 继续当公式。
 # 只需转义投稿者可控字段（标题、UP 主名）；分区名是官方枚举，不在信任边界外。
-_FORMULA_PREFIXES = ("=", "+", "-", "@")
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 RANKING_CSV_HEADERS = (
     "排名",
