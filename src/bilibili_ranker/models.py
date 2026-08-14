@@ -75,7 +75,7 @@ class VideoRankingRecord:
         item: Mapping[str, Any],
         *,
         rank: int,
-    ) -> "VideoRankingRecord":
+    ) -> VideoRankingRecord:
         bvid = _text(item.get("bvid"))
         title = _text(item.get("title"))
         if not _BVID_PATTERN.fullmatch(bvid):

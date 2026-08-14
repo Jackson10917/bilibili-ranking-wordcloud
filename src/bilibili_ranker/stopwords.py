@@ -10,8 +10,8 @@ try:  # importlib.abc.Traversable 3.12 起弃用、3.14 移除，优先用新位
     from importlib.resources.abc import Traversable
 except ImportError:  # Python 3.10
     from importlib.abc import Traversable
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 DEFAULT_LANGUAGES = ("zh", "en", "ja", "ko", "fr", "de", "es", "ru")
 
@@ -63,6 +63,10 @@ def load_stopword_policy(
     language_codes = tuple(
         dict.fromkeys(code.strip() for code in languages if isinstance(code, str) and code.strip())
     )
+    # 过滤后为空说明传进来的全是空串或非字符串：iso_stopwords(()) 返回空集、unsupported 也为空，
+    # 于是基础停用词静默全失效，词云产出满屏虚词。宁可报错。
+    if not language_codes:
+        raise ValueError("languages 里没有有效的语言代码")
     unsupported = [code for code in language_codes if not has_lang(code)]
     if unsupported:
         raise ValueError(f"stopwordsiso 不支持这些语言：{', '.join(unsupported)}")

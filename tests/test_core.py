@@ -12,6 +12,7 @@ import json
 import sys
 import tempfile
 import types
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -622,7 +623,7 @@ def test_font_env_var_overrides_default() -> None:
 
     with tempfile.TemporaryDirectory() as d:
         valid = Path(d) / "myfont.ttf"
-        valid.write_bytes(b"dummy")
+        valid.write_bytes(b"\x00\x01\x00\x00rest")  # sfnt 魔数，能过容器校验
 
         old = os.environ.get("BILIBILI_WORDCLOUD_FONT")
         try:
@@ -644,15 +645,230 @@ def test_font_env_var_overrides_default() -> None:
                 os.environ["BILIBILI_WORDCLOUD_FONT"] = old
 
 
+def test_corrupt_font_rejected_before_pil() -> None:
+    # 内容是垃圾的 fake.ttf 必须在校验阶段就报"损坏"，而不是拖到 PIL 抛
+    # "cannot open resource"，那时用户判断不出是自己指定的字体有问题。
+    from bilibili_ranker.fonts import FontNotFoundError, resolve_font_path
+
+    with tempfile.TemporaryDirectory() as d:
+        junk = Path(d) / "fake.ttf"
+        junk.write_bytes(b"dummy")
+        try:
+            resolve_font_path(junk)
+        except FontNotFoundError as exc:
+            assert "损坏" in str(exc)
+        else:
+            raise AssertionError("垃圾内容的字体未被拒绝")
+
+        # 真实字体（含 ttc）不能被误伤。
+        for magic in (b"\x00\x01\x00\x00", b"ttcf", b"OTTO"):
+            good = Path(d) / f"good_{magic.hex()}.ttf"
+            good.write_bytes(magic + b"padding")
+            assert resolve_font_path(good) == good.resolve()
+
+
+def test_zero_width_characters_do_not_split_tokens() -> None:
+    # B站"防和谐"标题会插零宽空格（U+200B，Cf 类，NFKC 不动它、split() 也不认），
+    # 不剔除的话「黑​丝」被劈成两个单字块，双双被 minimum_token_length 丢掉。
+    analyzer = TitleAnalyzer(load_stopword_policy())
+    record = VideoRankingRecord.from_api_item(
+        {"bvid": "BV1aa0000000", "title": "魔\u200b方 caf\u200bé"}, rank=1
+    )
+    assert analyzer.analyze([record]) == {"魔方": 1, "café": 1}
+
+
+def test_empty_language_list_rejected() -> None:
+    # 过滤后为空时 iso_stopwords(()) 返回空集、unsupported 也为空，
+    # 静默放行会让全部基础停用词失效，词云满屏虚词。
+    for languages in ([" "], [123], []):
+        try:
+            load_stopword_policy(languages=languages)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"languages={languages!r} 未被拒绝")
+
+
+def test_csv_written_before_tokenization() -> None:
+    # 分词阶段炸掉（jieba 缺失、Ctrl+C 等）不能让已抓完的榜单一个字节不落盘。
+    from unittest.mock import patch
+
+    import bilibili_ranker.cli as cli_module
+    from bilibili_ranker.client import RankingFetchResult
+
+    fetched = RankingFetchResult(
+        fetched_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        items=({"bvid": "BV1aa0000000", "title": "魔方教程"},),
+    )
+
+    def boom(self: object, _: object) -> dict[str, int]:
+        raise RuntimeError("缺少 jieba，请先安装项目依赖")
+
+    with tempfile.TemporaryDirectory() as directory:
+        with patch.object(cli_module, "fetch_all_ranking", lambda **_: fetched):
+            with patch.object(cli_module.TitleAnalyzer, "analyze", boom):
+                assert main(["--output-dir", directory]) == 1
+        csv_files = list(Path(directory).glob("ranking_*.csv"))
+        assert len(csv_files) == 1, csv_files
+        with csv_files[0].open(encoding="utf-8-sig", newline="") as stream:
+            rows = list(csv.DictReader(stream))
+        assert [row["BV号"] for row in rows] == ["BV1aa0000000"]
+
+
+def test_cli_success_path_writes_both_outputs() -> None:
+    # 端到端成功路径：summary JSON 字段齐全，CSV 与 PNG 都真实落盘。
+    from unittest.mock import patch
+
+    import pytest
+
+    import bilibili_ranker.cli as cli_module
+    from bilibili_ranker.client import RankingFetchResult
+    from bilibili_ranker.fonts import resolve_font_path
+
+    try:
+        resolve_font_path(None)
+    except RuntimeError:
+        pytest.skip("环境无 CJK 字体")
+
+    fetched = RankingFetchResult(
+        fetched_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        items=(
+            {"bvid": "BV1aa0000000", "title": "魔方教程 入门"},
+            {"bvid": "BV1aa0000000", "title": "重复项"},  # 去重命中
+            {"bvid": "bad", "title": "非法 bvid"},  # 解析拒绝
+        ),
+    )
+
+    with tempfile.TemporaryDirectory() as directory:
+        with patch.object(cli_module, "fetch_all_ranking", lambda **_: fetched):
+            assert main(["--output-dir", directory, "--width", "200", "--height", "100"]) == 0
+
+        csv_files = list(Path(directory).glob("ranking_*.csv"))
+        png_files = list(Path(directory).glob("wordcloud_*.png"))
+        assert len(csv_files) == 1 and len(png_files) == 1
+        assert png_files[0].read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+        assert not list(Path(directory).glob("*.tmp"))
+
+
+def test_output_bundle_suffix_keeps_pair_aligned() -> None:
+    # 同一秒重复运行时追加 -2/-3 后缀，且 CSV 与 PNG 共用同一后缀：
+    # 拆开编号会产出 ranking_...-3.csv 配 wordcloud_...-2.png 这种无法配对的组合。
+    from bilibili_ranker.storage import create_output_bundle
+
+    moment = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        first = create_output_bundle(root, moment)
+        assert first.ranking_csv.name == "ranking_20240101T000000Z.csv"
+        assert first.wordcloud_png.name == "wordcloud_20240101T000000Z.png"
+
+        first.ranking_csv.write_text("x", encoding="utf-8")
+        second = create_output_bundle(root, moment)
+        assert second.ranking_csv.name == "ranking_20240101T000000Z-2.csv"
+        assert second.wordcloud_png.name == "wordcloud_20240101T000000Z-2.png"
+
+        # 只有 PNG 被占用时同样整对跳号，绝不覆盖已有文件。
+        second.wordcloud_png.write_text("x", encoding="utf-8")
+        third = create_output_bundle(root, moment)
+        assert third.ranking_csv.name == "ranking_20240101T000000Z-3.csv"
+        assert third.wordcloud_png.name == "wordcloud_20240101T000000Z-3.png"
+
+
+def test_user_agent_read_at_call_time() -> None:
+    # _UA 绑成函数默认值时，进程内改 BILIBILI_UA 不生效也无法测试覆盖。
+    import os
+    from unittest.mock import patch
+
+    from bilibili_ranker.client import fetch_all_ranking
+
+    seen: list[str] = []
+
+    def fake_get(self: requests.Session, url: str, **kwargs: object) -> requests.Response:
+        headers = kwargs.get("headers") or {}
+        seen.append(headers["User-Agent"])
+        return _fake_json_response({"code": 0, "data": {"list": []}})
+
+    old = os.environ.get("BILIBILI_UA")
+    try:
+        os.environ["BILIBILI_UA"] = "custom-ua/1.0"
+        with patch.object(requests.Session, "get", fake_get):
+            fetch_all_ranking()
+        assert seen == ["custom-ua/1.0"]
+
+        del os.environ["BILIBILI_UA"]
+        seen.clear()
+        with patch.object(requests.Session, "get", fake_get):
+            fetch_all_ranking()
+        assert seen and "Chrome" in seen[0]  # 回落到内置默认 UA
+    finally:
+        if old is None:
+            os.environ.pop("BILIBILI_UA", None)
+        else:
+            os.environ["BILIBILI_UA"] = old
+
+
+def test_fontconfig_match_verifies_family() -> None:
+    # fc-match 找不到 family 时会静默回退到默认字体，必须比对返回的 family 名，
+    # 否则 Linux 上可能拿到一个不含中日韩字形的字体。
+    import subprocess
+    from unittest.mock import patch
+
+    from bilibili_ranker import fonts as fonts_module
+
+    with tempfile.TemporaryDirectory() as directory:
+        font = Path(directory) / "wqy-zenhei.ttc"
+        font.write_bytes(b"ttcf")
+
+        def fake_run(argv: tuple[str, ...], **_: object) -> subprocess.CompletedProcess:
+            family = argv[-1]
+            # 只有最后一个 family 精确命中，前面的都回退到 DejaVu Sans。
+            if family == "WenQuanYi Zen Hei":
+                stdout = f"{font}\nWenQuanYi Zen Hei,文泉驿正黑\n"
+            else:
+                stdout = f"{font}\nDejaVu Sans\n"
+            return subprocess.CompletedProcess(argv, 0, stdout, "")
+
+        with patch.object(fonts_module.shutil, "which", lambda _: "fc-match"):
+            with patch.object(fonts_module.subprocess, "run", fake_run):
+                assert fonts_module._fontconfig_match() == font.resolve()
+
+                # 所有 family 都回退时必须返回 None，而不是交出错字体。
+                def always_fallback(argv: tuple[str, ...], **_: object):
+                    return subprocess.CompletedProcess(argv, 0, f"{font}\nDejaVu Sans\n", "")
+
+                with patch.object(fonts_module.subprocess, "run", always_fallback):
+                    assert fonts_module._fontconfig_match() is None
+
+
+def test_standard_font_roots_include_windows_user_dir() -> None:
+    # 「为我安装」的字体只在用户目录，漏掉这条路径 Windows 上会误报找不到字体。
+    import os
+    from unittest.mock import patch
+
+    from bilibili_ranker.fonts import _standard_font_roots
+
+    with patch.dict(os.environ, {"WINDIR": r"C:\Windows", "LOCALAPPDATA": r"C:\Users\u\AppData"}):
+        roots = [str(path) for path in _standard_font_roots()]
+    assert any(root.endswith(os.path.join("Windows", "Fonts")) for root in roots)
+    assert any("Microsoft" in root and root.endswith("Fonts") for root in roots)
+
+
 if __name__ == "__main__":
     import pytest as _pytest
 
     # 动态收集，避免手工罗列漏掉新测试导致静默漏跑。
     # pytest.skip() 抛 _pytest.outcomes.Skipped，不捕获会中断循环导致后续测试静默漏跑。
+    # 断言失败也不能中断：否则第一条失败之后的测试全部静默漏跑，最后仍打印 ok。
+    _failures: list[str] = []
     for _name, _function in sorted(globals().items()):
         if _name.startswith("test_") and callable(_function):
             try:
                 _function()
             except _pytest.skip.Exception as _e:
                 print(f"SKIP {_name}: {_e}")
+            except BaseException as _e:  # noqa: BLE001 - 聚合报告，最后再退出
+                print(f"FAIL {_name}: {type(_e).__name__}: {_e}")
+                _failures.append(_name)
+    if _failures:
+        raise SystemExit(f"{len(_failures)} 个测试失败：{', '.join(_failures)}")
     print("ok")

@@ -6,8 +6,9 @@ import argparse
 import json
 import math
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from .cleaner import TitleAnalyzer, deduplicate_records
 from .client import fetch_all_ranking
@@ -64,15 +65,17 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     accepted, duplicate_rejected_count = deduplicate_records(records)
     rejected_count = parse_rejected_count + duplicate_rejected_count
 
+    # CSV 先落盘：分词（内部导入 jieba）抛任何异常都不该让已经抓完的榜单一个字节不留，
+    # 否则与「词云失败只降级警告、CSV 照常写出」的处理自相矛盾。
+    write_records_csv(bundle.ranking_csv, accepted)
+    if not accepted:
+        print("警告：没有解析出任何有效记录，CSV 只有表头。", file=sys.stderr)
+
     analyzer = TitleAnalyzer(
         policy,
         minimum_token_length=args.minimum_token_length,
     )
     frequencies = analyzer.analyze(accepted)
-
-    write_records_csv(bundle.ranking_csv, accepted)
-    if not accepted:
-        print("警告：没有解析出任何有效记录，CSV 只有表头。", file=sys.stderr)
 
     generated_wordcloud: Path | None = None
     if frequencies:

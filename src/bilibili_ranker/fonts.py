@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 
 class FontNotFoundError(RuntimeError):
@@ -59,12 +59,26 @@ def _standard_font_roots() -> Iterable[Path]:
     yield Path.home() / ".fonts"
 
 
+# sfnt 容器的魔数：TrueType(00 01 00 00 / true)、TrueType Collection(ttcf)、OpenType CFF(OTTO)。
+# 只看后缀的话，改名成 .ttf 的文本文件要拖到 PIL 才炸成 "cannot open resource"，
+# 用户根本判断不出是自己指定的字体损坏。
+_SFNT_MAGICS = (b"\x00\x01\x00\x00", b"true", b"ttcf", b"OTTO", b"typ1")
+
+
 def _validate_font_file(path: str | Path, *, source: str) -> Path:
     resolved = Path(path).expanduser()
     if not resolved.is_file():
         raise FontNotFoundError(f"{source} 指定的字体不存在：{resolved}")
     if resolved.suffix.casefold() not in {".ttf", ".ttc", ".otf"}:
         raise FontNotFoundError(f"{source} 不是受支持的字体文件：{resolved}")
+    # ponytail: 只校验容器魔数；字形表损坏仍要等 PIL 报错，那时错误信息已经有字体路径了。
+    try:
+        with resolved.open("rb") as stream:
+            header = stream.read(4)
+    except OSError as exc:
+        raise FontNotFoundError(f"{source} 指定的字体无法读取：{resolved}（{exc}）") from exc
+    if header not in _SFNT_MAGICS:
+        raise FontNotFoundError(f"{source} 指定的字体文件已损坏或不是字体：{resolved}")
     return resolved.resolve()
 
 

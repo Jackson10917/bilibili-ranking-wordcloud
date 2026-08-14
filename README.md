@@ -83,7 +83,7 @@ python -m bilibili_ranker --output-dir output
 --resource-dir PATH            覆盖内置停用词资源目录，该目录必须同时包含
                                custom_stopwords.txt 和 allowlist.txt，缺任一个直接报错退出
 --font-path PATH               指定 TTF、TTC 或 OTF 字体
---languages zh,en,ja,ko        指定停用词语言
+--languages zh,en,ja,ko        指定停用词语言，大小写不敏感（ZH 与 zh 等价）
 --minimum-token-length 2       普通词最短长度
 --width 1920                   词云图宽度
 --height 1080                  词云图高度
@@ -126,7 +126,7 @@ CSV 使用 `utf-8-sig` 编码，可直接使用 Excel 打开。标题和 UP 主�
 
 ## 标题处理
 
-标题首先进行 Unicode NFKC 和空白归一化。中文使用 `jieba` 分词；其他语言按连续字符片段提取。未列出的文字系统不会进入词频。
+标题首先进行 Unicode NFKC 归一化、剔除零宽等不可见字符（`Cf` 类）并压缩空白，避免「防和谐」标题里插入的零宽空格把词拆碎。中文使用 `jieba` 分词；其他语言按连续字符片段提取。未列出的文字系统不会进入词频。
 
 默认加载以下语言：
 
@@ -147,7 +147,14 @@ Emoji、标点及其他符号不参与词频统计。标题中只有 Emoji 或�
 3. 系统中的 Noto Sans CJK、思源黑体、微软雅黑、黑体、苹方或文泉驿字体；
 4. Linux `fontconfig` 返回的字体。
 
-Linux 推荐安装 Noto Sans CJK。仓库不包含专有字体文件。自动查找只确认候选字体文件存在，不检查完整字形覆盖；若词云出现缺字，请使用 `--font-path` 指定包含所需字符的字体。
+Linux 推荐安装 Noto Sans CJK。仓库不包含专有字体文件。显式指定的字体（`--font-path` 或 `BILIBILI_WORDCLOUD_FONT`）会校验后缀与 sfnt 容器魔数，内容损坏时直接报错，不会拖到渲染阶段；自动查找只确认候选字体文件存在，不检查完整字形覆盖，若词云出现缺字，请使用 `--font-path` 指定包含所需字符的字体。
+
+## 环境变量
+
+| 变量 | 作用 |
+| --- | --- |
+| `BILIBILI_WORDCLOUD_FONT` | 指定词云字体路径，优先级低于 `--font-path` |
+| `BILIBILI_UA` | 覆盖请求排行榜接口使用的 User-Agent，浏览器版本过时时无需改代码 |
 
 ## 数据来源
 

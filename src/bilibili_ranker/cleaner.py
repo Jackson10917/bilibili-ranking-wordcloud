@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import Counter
-from typing import Iterable
+from collections.abc import Iterable
 
 from .models import VideoRankingRecord
 from .stopwords import StopwordPolicy, normalize_token
@@ -49,7 +49,14 @@ _NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?")
 
 
 def normalize_title(title: str) -> str:
-    normalized = unicodedata.normalize("NFKC", title)
+    # NFKC 不动 Cf 类不可见字符（U+200B 零宽空格、U+FEFF、U+00AD 软连字符），它们也不是
+    # str.split() 认的空白。B 站"防和谐"标题「黑​丝」会被劈成两个单字块，双双被
+    # minimum_token_length 丢掉；拉丁词同样被截断。归一化时一并剔除。
+    normalized = "".join(
+        character
+        for character in unicodedata.normalize("NFKC", title)
+        if unicodedata.category(character) != "Cf"
+    )
     return " ".join(normalized.split())
 
 

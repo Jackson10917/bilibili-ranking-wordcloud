@@ -22,8 +22,13 @@ _DEFAULT_UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/140.0.0.0 Safari/537.36"
 )
-# 可通过环境变量覆盖，便于浏览器版本过时后无需改码。
-_UA = os.environ.get("BILIBILI_UA") or _DEFAULT_UA
+
+
+def _default_user_agent() -> str:
+    """运行时读取 BILIBILI_UA：绑成函数默认值的话，进程内改环境变量不生效也没法测。"""
+
+    return os.environ.get("BILIBILI_UA") or _DEFAULT_UA
+
 
 _RISK_CONTROL_CODE = -352
 _RISK_CONTROL_STATUS = 412
@@ -96,13 +101,14 @@ def _refresh_buvid(
 def fetch_all_ranking(
     *,
     timeout_seconds: float = 15.0,
-    user_agent: str = _UA,
+    user_agent: str | None = None,
 ) -> RankingFetchResult:
     """请求当前全站榜，接口和参数保持为 `rid=0&type=all`。
 
     被风控拦截（业务码 -352，或只有 HTTP 412 没有 JSON 体）时刷新 buvid cookie 后重试。
     """
 
+    user_agent = user_agent or _default_user_agent()
     fetched_at = datetime.now(timezone.utc)
     session = build_session()
     try:
