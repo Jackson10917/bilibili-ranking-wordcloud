@@ -70,14 +70,17 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
 
     generated_wordcloud: Path | None = None
     if analysis.word_frequencies:
-        generated_wordcloud = render_wordcloud(
-            analysis.word_frequencies,
-            bundle.wordcloud_png,
-            font_path=args.font_path,
-            width=args.width,
-            height=args.height,
-            max_words=args.max_words,
-        )
+        try:
+            generated_wordcloud = render_wordcloud(
+                analysis.word_frequencies,
+                bundle.wordcloud_png,
+                font_path=args.font_path,
+                width=args.width,
+                height=args.height,
+                max_words=args.max_words,
+            )
+        except (RuntimeError, ValueError, OSError) as exc:
+            print(f"警告：词云生成失败，仅输出 CSV：{exc}", file=sys.stderr)
 
     return {
         "抓取条数": len(fetched.items),
@@ -100,7 +103,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         summary = run_pipeline(args)
-    except (BilibiliAPIError, RuntimeError, ValueError, OSError) as exc:
+    except (RuntimeError, ValueError, OSError) as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:

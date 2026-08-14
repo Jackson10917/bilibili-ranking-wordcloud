@@ -19,6 +19,9 @@ dependencies = [
 [project.scripts]
 bilibili-rank = "bilibili_ranker.cli:main"
 
+[project.optional-dependencies]
+test = ["pytest>=7,<9"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

@@ -62,6 +62,9 @@ def load_stopword_policy(
     except ImportError as exc:
         raise RuntimeError("缺少 stopwordsiso，请先安装项目依赖") from exc
 
+    if isinstance(languages, str):
+        raise TypeError("languages 必须是语言代码的可迭代对象，不能是字符串")
+
     language_codes = tuple(dict.fromkeys(code.strip() for code in languages if code.strip()))
     unsupported = [code for code in language_codes if not has_lang(code)]
     if unsupported:

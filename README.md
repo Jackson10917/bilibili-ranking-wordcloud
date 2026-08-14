@@ -4,7 +4,7 @@
 
 ## 功能
 
-- 请求B站排行榜接口，记录数量以接口实际返回为准；
+- 请求B站排行榜接口（瞬时网络故障自动重试），记录数量以接口实际返回为准；
 - 按BV号去重并输出CSV；
 - 提取标题片段；
 - 使用 `jieba` 进行分词；
@@ -25,12 +25,14 @@
 │  ├─ wordcloud.py       # 词云图生成
 │  ├─ storage.py         # CSV 与输出路径
 │  ├─ cli.py             # 命令行流程
+│  ├─ __init__.py        # 包标记
+│  ├─ __main__.py        # 模块入口
 │  └─ resources/stopwords/
 │     ├─ custom_stopwords.txt
 │     ├─ allowlist.txt
 │     └─ README.md
 ├─ tests/
-│  └─ test_redundancy_fixes.py
+│  └─ test_core.py
 ├─ .gitignore
 ├─ LICENSE
 ├─ pyproject.toml
@@ -98,13 +100,13 @@ output/
 └─ wordcloud_YYYYMMDDTHHMMSSZ.png
 ```
 
-CSV 使用 `utf-8-sig` 编码，可直接使用 Excel 打开。再次运行不会删除已有结果；新结果使用新的时间标识保存。若标题清洗后没有可用词元，则只生成 CSV。
+CSV 使用 `utf-8-sig` 编码，可直接使用 Excel 打开。再次运行不会删除已有结果；同一秒内多次运行时，新结果会在文件名中追加 `-2`、`-3` 后缀，避免覆盖。若标题清洗后没有可用词元，或词云生成失败（如缺少字体），则只生成 CSV，并在失败时给出警告。
 
 ## CSV 字段
 
 | 表头 | 含义 |
 | --- | --- |
-| 排名 | 本次榜单顺序 |
+| 排名 | 本次榜单顺序（去重后可能不连续） |
 | BV号 | 视频BV号 |
 | 视频链接 | B站视频页面链接 |
 | 视频标题 | 视频标题原文 |
@@ -133,7 +135,7 @@ zh, en, ja, ko, fr, de, es, ru
 
 项目停用词位于 `custom_stopwords.txt`，需要保留的短词位于 `allowlist.txt`。保留词优先于基础停用词和项目停用词。
 
-Emoji、标点及其他符号不参与词频统计。标题中只有 Emoji 或符号时，该标题不会向词云图提供词元。
+Emoji、标点及其他符号不参与词频统计。标题中只有 Emoji 或符号时，该标题不会向词云图提供词元。纯数字词元（如年份 2024）同样不参与词频统计。
 
 ## 字体
 

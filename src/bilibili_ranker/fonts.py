@@ -15,14 +15,18 @@ class FontNotFoundError(RuntimeError):
 
 _CANDIDATE_FILES = (
     "NotoSansCJKsc-Regular.otf",
+    "NotoSansCJKsc-Medium.otf",
     "NotoSansCJK-Regular.ttc",
     "NotoSansSC-Regular.otf",
+    "NotoSansSC-Medium.otf",
     "SourceHanSansSC-Regular.otf",
     "SourceHanSansCN-Regular.otf",
     "SourceHanSansSC-VF.ttf",
     "msyh.ttc",
+    "msyh.ttf",
     "msyhbd.ttc",
     "simhei.ttf",
+    "simsun.ttc",
     "PingFang.ttc",
     "STHeiti Medium.ttc",
     "wqy-zenhei.ttc",

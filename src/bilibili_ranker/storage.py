@@ -28,10 +28,15 @@ def _utc_label(value: datetime) -> str:
 def create_output_bundle(root: str | Path, fetched_at: datetime) -> OutputBundle:
     base = Path(root)
     label = _utc_label(fetched_at)
-    return OutputBundle(
-        ranking_csv=base / f"ranking_{label}.csv",
-        wordcloud_png=base / f"wordcloud_{label}.png",
-    )
+    ranking_csv = base / f"ranking_{label}.csv"
+    wordcloud_png = base / f"wordcloud_{label}.png"
+    # ponytail: 同一秒内多次运行会重名，追加 -2/-3 后缀；并发进程仍可能竞争，需要时再加锁。
+    counter = 2
+    while ranking_csv.exists() or wordcloud_png.exists():
+        ranking_csv = base / f"ranking_{label}-{counter}.csv"
+        wordcloud_png = base / f"wordcloud_{label}-{counter}.png"
+        counter += 1
+    return OutputBundle(ranking_csv=ranking_csv, wordcloud_png=wordcloud_png)
 
 
 def _temporary_path(destination: Path) -> Path:

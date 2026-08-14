@@ -19,6 +19,8 @@ def render_wordcloud(
 ) -> Path:
     if not frequencies:
         raise ValueError("词频为空，无法生成词云")
+    if width < 1 or height < 1 or max_words < 1:
+        raise ValueError("词云尺寸和最大词数必须大于 0")
 
     try:
         from wordcloud import WordCloud

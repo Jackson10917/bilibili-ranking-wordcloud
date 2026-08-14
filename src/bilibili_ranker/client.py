@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 
 RANKING_PAGE_URL = "https://www.bilibili.com/v/popular/rank/all"
@@ -30,14 +32,25 @@ def fetch_all_ranking(
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
+        "Chrome/140.0.0.0 Safari/537.36"
     ),
 ) -> RankingFetchResult:
     """请求当前全站榜，接口和参数保持为 `rid=0&type=all`。"""
 
     fetched_at = datetime.now(timezone.utc)
+    session = requests.Session()
+    session.mount(
+        "https://",
+        HTTPAdapter(
+            max_retries=Retry(
+                total=2,
+                backoff_factor=0.5,
+                status_forcelist=(429, 500, 502, 503, 504),
+            )
+        ),
+    )
     try:
-        response = requests.get(
+        response = session.get(
             RANKING_API_URL,
             params={"rid": 0, "type": "all"},
             headers={
@@ -50,6 +63,8 @@ def fetch_all_ranking(
         response.raise_for_status()
     except requests.RequestException as exc:
         raise BilibiliAPIError(f"排行榜请求失败：{exc}") from exc
+    finally:
+        session.close()
 
     try:
         payload = response.json()

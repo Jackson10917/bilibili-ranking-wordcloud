@@ -14,10 +14,12 @@ from .models import VideoRankingRecord
 from .stopwords import StopwordPolicy, normalize_token
 
 
+_CJK_RANGE = r"\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U000323af"
+
 _CHUNK_PATTERN = re.compile(
     r"[A-Za-z][A-Za-z0-9]*(?:[._-][A-Za-z0-9]+)*(?:\+\+|#)?"
     r"|\d+[A-Za-z][A-Za-z0-9]*"
-    r"|[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+"
+    rf"|[{_CJK_RANGE}]+"
     r"|[\u3040-\u30ff\u31f0-\u31ff]+"
     r"|[\uac00-\ud7af]+"
     r"|[\u0400-\u04ff]+"
@@ -25,6 +27,7 @@ _CHUNK_PATTERN = re.compile(
     r"|\d+(?:\.\d+)?"
 )
 
+_CJK_PATTERN = re.compile(rf"[{_CJK_RANGE}]+")
 _NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?")
 
 
@@ -70,15 +73,7 @@ class TitleAnalyzer:
         self._minimum_token_length = minimum_token_length
 
     @staticmethod
-    def _is_chinese_chunk(chunk: str) -> bool:
-        return any(
-            "\u3400" <= character <= "\u4dbf"
-            or "\u4e00" <= character <= "\u9fff"
-            or "\uf900" <= character <= "\ufaff"
-            for character in chunk
-        )
-
-    def _candidate_tokens(self, title: str) -> list[str]:
+    def _candidate_tokens(title: str) -> list[str]:
         """提取文字词元；Emoji、标点和其他符号不会被模式匹配。"""
 
         normalized = normalize_title(title)
@@ -86,7 +81,7 @@ class TitleAnalyzer:
 
         for match in _CHUNK_PATTERN.finditer(normalized):
             chunk = match.group(0)
-            if self._is_chinese_chunk(chunk):
+            if _CJK_PATTERN.fullmatch(chunk):
                 tokens.extend(jieba.lcut(chunk, cut_all=False))
             else:
                 tokens.append(chunk)
@@ -96,13 +91,13 @@ class TitleAnalyzer:
         token = normalize_token(raw_token)
         if not token:
             return None
-        if self._policy.is_allowed(token):
+        if token in self._policy.allowlist:
             return token
         if _NUMBER_PATTERN.fullmatch(token):
             return None
         if len(token) < self._minimum_token_length:
             return None
-        if self._policy.should_remove(token):
+        if token in self._policy.stopwords:
             return None
         return token
 

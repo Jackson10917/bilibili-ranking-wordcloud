@@ -21,9 +21,11 @@ def _text(value: Any) -> str:
 def _optional_int(value: Any) -> int | None:
     if value is None or value == "":
         return None
+    if isinstance(value, float) and not value.is_integer():
+        return None
     try:
         parsed = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     return parsed if parsed >= 0 else None
 
