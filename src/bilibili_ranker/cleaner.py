@@ -23,7 +23,9 @@ def _jieba_lcut(text: str) -> list[str]:
     return _jieba.lcut(text, cut_all=False)
 
 
-_CJK_RANGE = r"\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U000323af"
+# U+3005 \u3005 \u662f\u53e0\u5b57\u7b26\uff08\u4eba\u3005\u3001\u6642\u3005\u3001\u69d8\u3005\uff09\uff0cU+3007 \u3007 \u662f\u8868\u610f\u6570\u5b57\u96f6\uff0c\u4e24\u8005 Unicode \u90fd\u5f52 CJK
+# Symbols \u5757\uff0c\u4e0d\u5728\u7edf\u4e00\u8868\u610f\u6587\u5b57\u533a\u95f4\u91cc\uff0c\u6f0f\u6389\u4f1a\u628a\u300c\u4eba\u3005\u300d\u6574\u8bcd\u5207\u788e\u540e\u4e22\u5e72\u51c0\u3002
+_CJK_RANGE = r"\u3005\u3007\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U000323af"
 
 # 拉丁字母词元包含重音字符（café、déjà），否则会被拆成单字母碎片。
 # 区间挖掉 ×(U+00D7) 和 ÷(U+00F7)：它们是数学符号，不是字母（XML NameChar 经典区间）。
@@ -48,6 +50,14 @@ _CJK_PATTERN = re.compile(rf"[{_CJK_RANGE}]+")
 _NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?")
 
 
+# 链接和 BV 号是标识符，不是词：https、b23.tv、www.bilibili.com、video、bv1xx411c7md 都会
+# 混进词云，而停用词表只能收精确词，覆盖不了域名和随机 BV 号变体。分词前整段剥掉。
+_NOISE_PATTERN = re.compile(
+    r"https?://\S+|www\.[^\s/]+\S*|\bBV[0-9A-Za-z]{10}\b",
+    re.IGNORECASE,
+)
+
+
 def normalize_title(title: str) -> str:
     # NFKC 不动 Cf 类不可见字符（U+200B 零宽空格、U+FEFF、U+00AD 软连字符），它们也不是
     # str.split() 认的空白。B 站"防和谐"标题「黑​丝」会被劈成两个单字块，双双被
@@ -57,7 +67,8 @@ def normalize_title(title: str) -> str:
         for character in unicodedata.normalize("NFKC", title)
         if unicodedata.category(character) != "Cf"
     )
-    return " ".join(normalized.split())
+    # 剥噪声在剔除零宽字符之后：链接里插了零宽字符时正则同样能命中。
+    return " ".join(_NOISE_PATTERN.sub(" ", normalized).split())
 
 
 def deduplicate_records(

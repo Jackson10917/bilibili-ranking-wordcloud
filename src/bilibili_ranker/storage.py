@@ -29,15 +29,27 @@ def _utc_label(value: datetime) -> str:
 def create_output_bundle(root: str | Path, fetched_at: datetime) -> OutputBundle:
     base = Path(root)
     label = _utc_label(fetched_at)
+    base.mkdir(parents=True, exist_ok=True)
     ranking_csv = base / f"ranking_{label}.csv"
     wordcloud_png = base / f"wordcloud_{label}.png"
-    # ponytail: 同一秒内多次运行会重名，追加 -2/-3 后缀；并发进程仍可能竞争，需要时再加锁。
+    # 同一秒内多次运行会重名，追加 -2/-3 后缀。用 O_CREAT|O_EXCL 原子占位 CSV 而不是
+    # exists()：后者在"检查"和"写入"之间有窗口，同秒并发的两个进程会拿到同一编号，
+    # 后写者的 os.replace 直接覆盖先写者的结果。PNG 只做存在性检查，跟随 CSV 的编号
+    # （编号由占位成败唯一确定，因此并发进程不会撞 PNG），避免词云不生成时留下空文件。
     counter = 2
-    while ranking_csv.exists() or wordcloud_png.exists():
+    while True:
+        try:
+            os.close(os.open(ranking_csv, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        except FileExistsError:
+            pass
+        else:
+            if not wordcloud_png.exists():
+                return OutputBundle(ranking_csv=ranking_csv, wordcloud_png=wordcloud_png)
+            # PNG 已被占用：撤掉刚占位的空 CSV，整对跳号。
+            ranking_csv.unlink(missing_ok=True)
         ranking_csv = base / f"ranking_{label}-{counter}.csv"
         wordcloud_png = base / f"wordcloud_{label}-{counter}.png"
         counter += 1
-    return OutputBundle(ranking_csv=ranking_csv, wordcloud_png=wordcloud_png)
 
 
 def temporary_path(destination: Path) -> Path:

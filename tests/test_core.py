@@ -1,8 +1,9 @@
 """回归检查：去重、停用词、分词、排行榜请求重试与 CSV 原子写入。
 
-需要已安装项目依赖（jieba、stopwordsiso）。可直接运行：
-python tests/test_core.py
-或由 pytest 收集。
+需要已安装项目依赖（jieba、stopwordsiso）。由 pytest 收集运行：
+python -m pytest tests
+也可直接运行 python tests/test_core.py，但聚合器同样依赖 pytest（用于 skip 语义），
+需先安装 `pip install -e ".[test]"`。
 """
 
 from __future__ import annotations
@@ -441,6 +442,127 @@ def test_non_finite_timeout_rejected() -> None:
             assert exc.code == 2, value
         else:
             raise AssertionError(f"--timeout {value} 应该被拒绝")
+
+
+def test_oversized_timeout_rejected() -> None:
+    # 1e9 起 socket.settimeout 就抛 OverflowError，只校验"有限且 > 0"挡不住，
+    # main 也不捕获 OverflowError，用户会看到 traceback。
+    from bilibili_ranker.client import BilibiliAPIError, fetch_all_ranking
+
+    for value in ("1e10", "1e100", "86401"):
+        try:
+            main(["--timeout", value])
+        except SystemExit as exc:
+            assert exc.code == 2, value
+        else:
+            raise AssertionError(f"--timeout {value} 应该被拒绝")
+
+    # 库函数直接调用同样要挡住，且错误类型与本模块其余错误一致。
+    for bad in (1e10, -1, 0, float("inf"), float("nan")):
+        try:
+            fetch_all_ranking(timeout_seconds=bad)
+        except BilibiliAPIError:
+            pass
+        else:
+            raise AssertionError(f"timeout_seconds={bad} 应该被拒绝")
+
+
+def test_retries_on_200_with_invalid_json() -> None:
+    # CDN 偶发返回截断 body 或 HTML 错误页（HTTP 仍是 200），一次就报死属于把瞬时故障
+    # 当永久失败。urllib3 Retry 只覆盖异常和 429/5xx，这一类不在范围内。
+    import http.server
+    import json as _json
+    import threading
+
+    import bilibili_ranker.client as client_module
+
+    good = _json.dumps({"code": 0, "data": {"list": [{"bvid": "BV1aa0000000", "title": "测试"}]}})
+    counter = {"n": 0}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler 接口
+            counter["n"] += 1
+            body = b"<html>502</html>" if counter["n"] == 1 else good.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_: object) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    original = client_module.RANKING_API_URL
+    client_module.RANKING_API_URL = f"http://127.0.0.1:{server.server_port}/x"
+    try:
+        result = client_module.fetch_all_ranking(timeout_seconds=5)
+        assert counter["n"] == 2, counter
+        assert result.items[0]["bvid"] == "BV1aa0000000"
+    finally:
+        client_module.RANKING_API_URL = original
+        server.shutdown()
+        server.server_close()
+
+
+def test_empty_result_exits_nonzero() -> None:
+    # 接口成功但整榜解析失败时返回 0，会让定时任务把只有表头的 CSV 当成功结果。
+    from unittest.mock import patch
+
+    import bilibili_ranker.cli as cli_module
+    from bilibili_ranker.client import RankingFetchResult
+
+    fetched = RankingFetchResult(
+        fetched_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        items=({"bvid": "bad", "title": "字段变更"},),
+    )
+
+    with tempfile.TemporaryDirectory() as directory:
+        with patch.object(cli_module, "fetch_all_ranking", lambda **_: fetched):
+            assert main(["--output-dir", directory]) == 1
+        # 退出码非零，但 CSV 仍要落盘，便于排查上游字段变化。
+        csv_files = list(Path(directory).glob("ranking_*.csv"))
+        assert len(csv_files) == 1, csv_files
+
+
+def test_link_and_bvid_noise_stripped() -> None:
+    # 链接片段和 BV 号不是词：停用词表只能收精确词，覆盖不了域名和随机 BV 号。
+    policy = load_stopword_policy()
+    analyzer = TitleAnalyzer(policy)
+    record = VideoRankingRecord.from_api_item(
+        {
+            "bvid": "BV1aa0000000",
+            "title": "传送门 https://b23.tv/abc www.bilibili.com/video/BV1xx411c7mD BV1yy411c7mD",
+        },
+        rank=1,
+    )
+    frequencies = analyzer.analyze([record])
+    assert "传送门" in frequencies
+    for noise in ("https", "b23.tv", "abc", "www.bilibili.com", "video", "bv1xx411c7md"):
+        assert noise not in frequencies, frequencies
+
+
+def test_japanese_iteration_mark_kept() -> None:
+    # 々(U+3005) 归 CJK Symbols 块，不在统一表意文字区间：漏掉会把「人々」整词丢干净。
+    policy = load_stopword_policy()
+    analyzer = TitleAnalyzer(policy)
+    tokens = analyzer._candidate_tokens("人々 時々 様々")
+    for word in ("人々", "時々", "様々"):
+        assert word in tokens, tokens
+
+
+def test_output_bundle_reserves_csv_atomically() -> None:
+    # exists() 检查在"检查"和"写入"之间有窗口：同秒并发的两个进程会拿到同一编号，
+    # 后写者的 os.replace 覆盖先写者的结果。占位必须是原子的。
+    from bilibili_ranker.storage import create_output_bundle
+
+    moment = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        # 连续调用而不写入任何内容，模拟两个并发进程都还没走到 os.replace。
+        names = [create_output_bundle(root, moment).ranking_csv.name for _ in range(3)]
+        assert len(set(names)) == 3, names
 
 
 def test_wordcloud_write_is_atomic() -> None:

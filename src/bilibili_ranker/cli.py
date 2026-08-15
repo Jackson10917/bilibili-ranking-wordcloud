@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .cleaner import TitleAnalyzer, deduplicate_records
-from .client import fetch_all_ranking
+from .client import MAX_TIMEOUT_SECONDS, fetch_all_ranking
 from .models import parse_ranking_records
 from .stopwords import DEFAULT_LANGUAGES, load_stopword_policy
 from .storage import create_output_bundle, write_records_csv
@@ -57,6 +57,9 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     # 而不是抓完整个榜单再抛异常、CSV 一个字节都不落盘。
     policy = load_stopword_policy(args.resource_dir, languages=args.languages)
 
+    # 同理先探输出目录：CSV 先落盘的设计下，目录不可写会让抓完的整榜数据白抓一遍。
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+
     fetched = fetch_all_ranking(timeout_seconds=args.timeout)
 
     bundle = create_output_bundle(args.output_dir, fetched.fetched_at)
@@ -68,8 +71,14 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     # CSV 先落盘：分词（内部导入 jieba）抛任何异常都不该让已经抓完的榜单一个字节不留，
     # 否则与「词云失败只降级警告、CSV 照常写出」的处理自相矛盾。
     write_records_csv(bundle.ranking_csv, accepted)
+
+    # 接口成功但整榜无法解析（上游字段改名）时，退出码 0 会让定时任务把只有表头的 CSV
+    # 当成功结果。CSV 已经落盘，抛异常即可：main 会打印错误并返回 1。
     if not accepted:
-        print("警告：没有解析出任何有效记录，CSV 只有表头。", file=sys.stderr)
+        raise RuntimeError(
+            f"没有解析出任何有效记录（抓取 {len(fetched.items)} 条，全部被拒绝），"
+            f"CSV 只有表头：{bundle.ranking_csv}"
+        )
 
     analyzer = TitleAnalyzer(
         policy,
@@ -91,7 +100,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         # 超大 --width/--height 会让 PIL 抛 MemoryError，不能以 traceback 收场。
         except (RuntimeError, ValueError, OSError, MemoryError) as exc:
             print(f"警告：词云生成失败，仅输出 CSV：{exc}", file=sys.stderr)
-    elif accepted:
+    else:
         print("警告：标题清洗后没有可用词元，只输出 CSV。", file=sys.stderr)
 
     return {
@@ -106,9 +115,9 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    # inf/nan 都能绕过 `<= 0`：inf 会让 socket.settimeout 抛 OverflowError 逸出错误处理。
-    if not math.isfinite(args.timeout) or args.timeout <= 0:
-        parser.error("--timeout 必须是大于 0 的有限数")
+    # inf/nan 都能绕过 `<= 0`；1e10 这类有限大值同样会让 socket.settimeout 抛 OverflowError。
+    if not math.isfinite(args.timeout) or not 0 < args.timeout <= MAX_TIMEOUT_SECONDS:
+        parser.error(f"--timeout 必须是 0 到 {MAX_TIMEOUT_SECONDS:.0f} 之间的有限数")
     if args.width <= 0 or args.height <= 0 or args.max_words <= 0:
         parser.error("词云尺寸和最大词数必须大于 0")
     if args.minimum_token_length <= 0:

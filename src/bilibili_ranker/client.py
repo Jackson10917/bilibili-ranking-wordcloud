@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import time
 from collections.abc import Mapping
@@ -29,6 +30,10 @@ def _default_user_agent() -> str:
 
     return os.environ.get("BILIBILI_UA") or _DEFAULT_UA
 
+
+# socket.settimeout 对超大值会抛 OverflowError（1e9 起就 "doesn't fit into C timeval"），
+# 不是调用方能理解的错误。一天足够覆盖任何合理超时，超过就是参数写错了。
+MAX_TIMEOUT_SECONDS = 86_400.0
 
 _RISK_CONTROL_CODE = -352
 _RISK_CONTROL_STATUS = 412
@@ -108,6 +113,13 @@ def fetch_all_ranking(
     被风控拦截（业务码 -352，或只有 HTTP 412 没有 JSON 体）时刷新 buvid cookie 后重试。
     """
 
+    # 在公共 API 入口统一校验：CLI 之外的调用方直接传 -1/inf/1e10 时，底层会抛
+    # ValueError/OverflowError，与本模块其余错误（BilibiliAPIError）不是一类，调用方没法统一处理。
+    if not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= MAX_TIMEOUT_SECONDS:
+        raise BilibiliAPIError(
+            f"timeout_seconds 必须是 0 到 {MAX_TIMEOUT_SECONDS:.0f} 之间的有限数：{timeout_seconds!r}"
+        )
+
     user_agent = user_agent or _default_user_agent()
     fetched_at = datetime.now(timezone.utc)
     session = build_session()
@@ -135,6 +147,18 @@ def fetch_all_ranking(
             # 但 412 带了业务码就按业务码判：代理/CDN 的 412 不该把真实错误码盖成"风控"。
             # （412 + code=0 会被 raise_for_status 作为 HTTP 错误上报，至少保留了真实状态码。）
             last_response = response
+
+            # 200 但 JSON 无效：CDN 偶发返回截断/HTML 错误页，重试一次通常就好。
+            # 只在 200 上重试，412 仍交给下面的风控分支处理。
+            # ponytail: 传输层截断（IncompleteRead）走 RequestException，requests 在 body
+            # 读取阶段已出 urllib3 Retry 范围，重试它会与 Retry(total=2) 叠乘，不做。
+            if (
+                payload is None
+                and response.status_code == 200
+                and attempt < _RISK_CONTROL_ATTEMPTS - 1
+            ):
+                continue
+
             if code == _RISK_CONTROL_CODE or (
                 response.status_code == _RISK_CONTROL_STATUS and code is None
             ):
