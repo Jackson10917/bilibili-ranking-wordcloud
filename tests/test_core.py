@@ -1057,6 +1057,72 @@ def test_standard_font_roots_include_windows_user_dir() -> None:
     assert any("Microsoft" in root and root.endswith("Fonts") for root in roots)
 
 
+def test_missing_resource_dir_exits_one() -> None:
+    # README 承诺 --resource-dir 缺文件退出码 1（值有效但资源不可用），且必须在发请求前报错。
+    from unittest.mock import patch
+
+    import bilibili_ranker.cli as cli_module
+
+    def boom(**_: object) -> object:
+        raise AssertionError("资源缺失时不应该发起网络请求")
+
+    with tempfile.TemporaryDirectory() as empty_dir:
+        with patch.object(cli_module, "fetch_all_ranking", boom):
+            assert main(["--resource-dir", empty_dir]) == 1
+
+
+def test_keyboard_interrupt_exits_130() -> None:
+    # Ctrl+C 必须走退出码 130（README 已承诺），不能以 KeyboardInterrupt traceback 收场。
+    from unittest.mock import patch
+
+    import bilibili_ranker.cli as cli_module
+
+    def interrupt(**_: object) -> object:
+        raise KeyboardInterrupt
+
+    with tempfile.TemporaryDirectory() as directory:
+        with patch.object(cli_module, "fetch_all_ranking", interrupt):
+            assert main(["--output-dir", directory]) == 130
+
+
+def test_failed_run_removes_empty_placeholder_csv() -> None:
+    # create_output_bundle 的 O_EXCL 占位若在 write_records_csv 之前崩溃，会永久残留
+    # 0 字节 CSV 并占掉编号（下次运行跳到 -2）。失败路径必须清理空占位。
+    from unittest.mock import patch
+
+    import bilibili_ranker.cli as cli_module
+    from bilibili_ranker.client import RankingFetchResult
+
+    fetched = RankingFetchResult(
+        fetched_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        items=({"bvid": "BV1aa0000000", "title": "魔方教程"},),
+    )
+
+    def boom(*_: object, **__: object) -> Path:
+        raise KeyboardInterrupt
+
+    with tempfile.TemporaryDirectory() as directory:
+        with patch.object(cli_module, "fetch_all_ranking", lambda **_: fetched):
+            with patch.object(cli_module, "write_records_csv", boom):
+                assert main(["--output-dir", directory]) == 130
+        assert not list(Path(directory).glob("ranking_*.csv"))
+
+        # 清理只针对 0 字节占位：写成功后的 CSV 绝不能被后续失败误删。
+        with patch.object(cli_module, "fetch_all_ranking", lambda **_: fetched):
+            with patch.object(cli_module.TitleAnalyzer, "analyze", boom):
+                assert main(["--output-dir", directory]) == 130
+        remaining = list(Path(directory).glob("ranking_*.csv"))
+        assert len(remaining) == 1 and remaining[0].stat().st_size > 0
+
+
+def test_version_exported() -> None:
+    # 库调用方需要 __version__；未安装时回落到 dev 占位而不是 ImportError。
+    import bilibili_ranker
+
+    assert isinstance(bilibili_ranker.__version__, str)
+    assert bilibili_ranker.__version__
+
+
 if __name__ == "__main__":
     import pytest as _pytest
 

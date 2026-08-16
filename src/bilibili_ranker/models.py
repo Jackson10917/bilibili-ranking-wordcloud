@@ -87,7 +87,9 @@ class VideoRankingRecord:
         stat = _mapping(item.get("stat"))
         # pubdate=0 是「时间未知」的哨兵值，不是 1970 年：直接格式化会往 CSV 里写
         # 1970-01-01 08:00:00，看着像真实发布时间。当缺失处理。
-        published_timestamp = _optional_int(item.get("pubdate")) or None
+        published_timestamp = _optional_int(item.get("pubdate"))
+        if published_timestamp == 0:
+            published_timestamp = None
 
         return cls(
             rank=rank,

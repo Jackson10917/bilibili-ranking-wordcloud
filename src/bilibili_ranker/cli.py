@@ -66,13 +66,24 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
 
     bundle = create_output_bundle(args.output_dir, fetched.fetched_at)
 
-    records, parse_rejected_count = parse_ranking_records(fetched.items)
-    accepted, duplicate_rejected_count = deduplicate_records(records)
-    rejected_count = parse_rejected_count + duplicate_rejected_count
+    # create_output_bundle 用 O_CREAT|O_EXCL 占位了一个 0 字节 CSV。这里到 write_records_csv
+    # 之间若抛异常（Ctrl+C、解析崩溃），占位文件会永久残留并占掉该编号，下次运行跳到 -2。
+    # 只在文件仍是 0 字节时清理，绝不碰已经写入内容的结果。
+    try:
+        records, parse_rejected_count = parse_ranking_records(fetched.items)
+        accepted, duplicate_rejected_count = deduplicate_records(records)
 
-    # CSV 先落盘：分词（内部导入 jieba）抛任何异常都不该让已经抓完的榜单一个字节不留，
-    # 否则与「词云失败只降级警告、CSV 照常写出」的处理自相矛盾。
-    write_records_csv(bundle.ranking_csv, accepted)
+        # CSV 先落盘：分词（内部导入 jieba）抛任何异常都不该让已经抓完的榜单一个字节不留，
+        # 否则与「词云失败只降级警告、CSV 照常写出」的处理自相矛盾。
+        write_records_csv(bundle.ranking_csv, accepted)
+    except BaseException:
+        try:
+            if bundle.ranking_csv.stat().st_size == 0:
+                bundle.ranking_csv.unlink()
+        except OSError:
+            pass
+        raise
+    rejected_count = parse_rejected_count + duplicate_rejected_count
 
     # 接口成功但整榜无法解析（上游字段改名）时，退出码 0 会让定时任务把只有表头的 CSV
     # 当成功结果。CSV 已经落盘，抛异常即可：main 会打印错误并返回 1。

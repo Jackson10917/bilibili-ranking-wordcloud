@@ -1,10 +1,14 @@
 name: CI
 
 on:
+  # push 只收 main：否则同仓库 PR 会同时触发 push 和 pull_request，16 个 job 白跑两遍。
+  # concurrency 拦不住这种重复——两类事件的 github.ref 不同（refs/heads/x vs
+  # refs/pull/N/merge），group 不同就不会互相取消。
   push:
+    branches: [main]
   pull_request:
 
-# 同仓库 PR 会同时触发 push 和 pull_request，16 个 job 白跑两遍。
+# 同一分支/PR 连续推送时取消上一轮未跑完的 job。
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
