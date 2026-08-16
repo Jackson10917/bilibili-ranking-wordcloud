@@ -126,6 +126,14 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # 摘要 JSON 和警告都含中文。Windows 上重定向到管道/文件时 stdout 用的是 ANSI 代码页
+    # （西文机器是 cp1252），print 会以 UnicodeEncodeError 收场——活干完了却报错退出。
+    # Python 3.15 起 UTF-8 成为默认，届时这段是空操作。
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
     parser = build_parser()
     args = parser.parse_args(argv)
     # inf/nan 都能绕过 `<= 0`；1e10 这类有限大值同样会让 socket.settimeout 抛 OverflowError。

@@ -60,10 +60,14 @@ def load_stopword_policy(
     if isinstance(languages, str):
         raise TypeError("languages 必须是语言代码的可迭代对象，不能是字符串")
 
-    language_codes = tuple(
-        dict.fromkeys(code.strip() for code in languages if isinstance(code, str) and code.strip())
-    )
-    # 过滤后为空说明传进来的全是空串或非字符串：iso_stopwords(()) 返回空集、unsupported 也为空，
+    # 非字符串语言码是调用方的 bug（("zh", 123) 里的 123），静默丢掉会让停用词表少一门
+    # 语言而毫无提示。空串是分隔符残留（"zh,,en".split(",")），丢掉即可。
+    materialized = tuple(languages)
+    invalid = [code for code in materialized if not isinstance(code, str)]
+    if invalid:
+        raise ValueError(f"languages 里有非字符串语言代码：{invalid}")
+    language_codes = tuple(dict.fromkeys(code.strip() for code in materialized if code.strip()))
+    # 过滤后为空说明传进来的全是空串：iso_stopwords(()) 返回空集、unsupported 也为空，
     # 于是基础停用词静默全失效，词云产出满屏虚词。宁可报错。
     if not language_codes:
         raise ValueError("languages 里没有有效的语言代码")

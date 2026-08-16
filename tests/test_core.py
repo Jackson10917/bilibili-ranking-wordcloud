@@ -543,6 +543,20 @@ def test_link_and_bvid_noise_stripped() -> None:
         assert noise not in frequencies, frequencies
 
 
+def test_schemeless_links_stripped() -> None:
+    # B站标题里的链接大多不带协议：「点击 b23.tv/abc 看教程」。只匹配 https?:// 和 www.
+    # 会把 b23.tv、bilibili.com、video 当成词元推进词云。
+    from bilibili_ranker.cleaner import normalize_title
+
+    assert normalize_title("点击 b23.tv/abc123 看教程") == "点击 看教程"
+    assert normalize_title("传送门 bilibili.com/video/BV1xx411c7mD 见简介") == "传送门 见简介"
+    # 子域名（m./www./space.）与无路径裸域名同样要剥。
+    assert normalize_title("看这里 m.bilibili.com/video/av123 测评") == "看这里 测评"
+    assert normalize_title("跳转 b23.tv 即可") == "跳转 即可"
+    # 只收 B站自家域名：正常词元里的点号不能被误伤。
+    assert normalize_title("版本 3.5 上线 vs. 旧版") == "版本 3.5 上线 vs. 旧版"
+
+
 def test_link_stripping_keeps_adjacent_cjk() -> None:
     # 链接主体用 \S 会连紧贴的中日韩文字一起吞掉，整条标题被剥空。
     from bilibili_ranker.cleaner import normalize_title
@@ -812,7 +826,8 @@ def test_zero_width_characters_do_not_split_tokens() -> None:
 def test_empty_language_list_rejected() -> None:
     # 过滤后为空时 iso_stopwords(()) 返回空集、unsupported 也为空，
     # 静默放行会让全部基础停用词失效，词云满屏虚词。
-    for languages in ([" "], [123], []):
+    # 非字符串语言码即使混在合法码里也要报错：静默丢掉会让停用词表少一门语言而无提示。
+    for languages in ([" "], [123], [], ["zh", 123], ["zh", None]):
         try:
             load_stopword_policy(languages=languages)
         except ValueError:
@@ -845,6 +860,33 @@ def test_csv_written_before_tokenization() -> None:
         with csv_files[0].open(encoding="utf-8-sig", newline="") as stream:
             rows = list(csv.DictReader(stream))
         assert [row["BV号"] for row in rows] == ["BV1aa0000000"]
+
+
+def test_main_reconfigures_stdout_to_utf8() -> None:
+    # Windows 上重定向 stdout 时用的是 ANSI 代码页，含中文键的摘要 JSON 会抛
+    # UnicodeEncodeError：活干完了却报错退出。main 开头必须把两个流都拉到 UTF-8。
+    import io
+    import sys
+    from unittest.mock import patch
+
+    calls: list[dict[str, object]] = []
+
+    class RecordingStream(io.StringIO):
+        def reconfigure(self, **kwargs: object) -> None:
+            calls.append(kwargs)
+
+    with (
+        patch.object(sys, "stdout", RecordingStream()),
+        patch.object(sys, "stderr", RecordingStream()),
+    ):
+        try:
+            main(["--timeout", "0"])  # parser.error 退出前 reconfigure 已执行
+        except SystemExit:
+            pass
+
+    assert len(calls) == 2, calls
+    for kwargs in calls:
+        assert kwargs == {"encoding": "utf-8", "errors": "replace"}
 
 
 def test_cli_success_path_writes_both_outputs() -> None:
