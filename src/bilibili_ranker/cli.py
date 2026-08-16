@@ -37,7 +37,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--languages",
         type=_language_codes,
         default=DEFAULT_LANGUAGES,
-        help="逗号分隔的 stopwordsiso 语言代码",
+        # 默认值不经 type 转换，不能写成字符串（会触发 stopwords.py 的字符串防护）；
+        # 元组直接进 help 会显示成 ('zh', 'en', ...)，所以手写默认值文本。
+        help=f"逗号分隔的 stopwordsiso 语言代码（默认：{','.join(DEFAULT_LANGUAGES)}）",
     )
     parser.add_argument("--timeout", type=float, default=15.0, help="请求超时秒数")
     parser.add_argument("--width", type=int, default=1920, help="词云宽度")

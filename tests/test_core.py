@@ -543,6 +543,16 @@ def test_link_and_bvid_noise_stripped() -> None:
         assert noise not in frequencies, frequencies
 
 
+def test_link_stripping_keeps_adjacent_cjk() -> None:
+    # 链接主体用 \S 会连紧贴的中日韩文字一起吞掉，整条标题被剥空。
+    from bilibili_ranker.cleaner import normalize_title
+
+    assert normalize_title("传送门https://b23.tv/abc教程") == "传送门 教程"
+    assert normalize_title("看这里www.bilibili.com/video测评") == "看这里 测评"
+    # 纯链接仍要整段剥掉，不能因为收窄字符集而漏出残片。
+    assert normalize_title("https://b23.tv/abc?a=1#f") == ""
+
+
 def test_japanese_iteration_mark_kept() -> None:
     # 々(U+3005) 归 CJK Symbols 块，不在统一表意文字区间：漏掉会把「人々」整词丢干净。
     policy = load_stopword_policy()
@@ -870,6 +880,78 @@ def test_cli_success_path_writes_both_outputs() -> None:
         assert len(csv_files) == 1 and len(png_files) == 1
         assert png_files[0].read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
         assert not list(Path(directory).glob("*.tmp"))
+
+
+def test_zero_pubdate_is_missing_not_1970() -> None:
+    # B 站对部分视频下发 pubdate=0（时间未知）：直接格式化会写出 1970-01-01 08:00:00，
+    # 看着像真实发布时间。当缺失处理，CSV 该列留空。
+    record = VideoRankingRecord.from_api_item(
+        {"bvid": "BV1aa0000000", "title": "魔方教程", "pubdate": 0},
+        rank=1,
+    )
+    assert record.published_at is None
+    # 正常时间戳仍要正确转成北京时间。
+    normal = VideoRankingRecord.from_api_item(
+        {"bvid": "BV1aa0000000", "title": "魔方教程", "pubdate": 1704067200},
+        rank=1,
+    )
+    assert normal.published_at == "2024-01-01 08:00:00"
+
+
+def test_wordcloud_failure_keeps_csv_and_exits_zero() -> None:
+    # 词云渲染失败是降级路径：警告 + CSV 保留 + 退出码 0，不能升级成失败。
+    from unittest.mock import patch
+
+    import bilibili_ranker.cli as cli_module
+    from bilibili_ranker.client import RankingFetchResult
+
+    fetched = RankingFetchResult(
+        fetched_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        items=({"bvid": "BV1aa0000000", "title": "魔方教程"},),
+    )
+
+    def boom(*_: object, **__: object) -> Path:
+        raise RuntimeError("找不到字体")
+
+    with tempfile.TemporaryDirectory() as directory:
+        with patch.object(cli_module, "fetch_all_ranking", lambda **_: fetched):
+            with patch.object(cli_module, "render_wordcloud", boom):
+                assert main(["--output-dir", directory]) == 0
+        assert len(list(Path(directory).glob("ranking_*.csv"))) == 1
+        assert not list(Path(directory).glob("wordcloud_*.png"))
+
+
+def test_empty_frequencies_still_writes_csv() -> None:
+    # 标题清洗后无词元（全是停用词/表情）时只输出 CSV，退出码仍为 0。
+    from unittest.mock import patch
+
+    import bilibili_ranker.cli as cli_module
+    from bilibili_ranker.client import RankingFetchResult
+
+    fetched = RankingFetchResult(
+        fetched_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        items=({"bvid": "BV1aa0000000", "title": "🎉🎉🎉"},),
+    )
+
+    with tempfile.TemporaryDirectory() as directory:
+        with patch.object(cli_module, "fetch_all_ranking", lambda **_: fetched):
+            assert main(["--output-dir", directory]) == 0
+        assert len(list(Path(directory).glob("ranking_*.csv"))) == 1
+        assert not list(Path(directory).glob("wordcloud_*.png"))
+
+
+def test_output_bundle_releases_placeholder_when_png_taken() -> None:
+    # PNG 已被占用时整对跳号，且刚占位的空 CSV 必须撤销，否则留下 0 字节垃圾文件。
+    from bilibili_ranker.storage import create_output_bundle
+
+    moment = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "wordcloud_20240101T000000Z.png").write_bytes(b"x")
+
+        bundle = create_output_bundle(root, moment)
+        assert bundle.ranking_csv.name == "ranking_20240101T000000Z-2.csv"
+        assert not (root / "ranking_20240101T000000Z.csv").exists()
 
 
 def test_output_bundle_suffix_keeps_pair_aligned() -> None:

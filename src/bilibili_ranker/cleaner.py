@@ -52,8 +52,10 @@ _NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?")
 
 # 链接和 BV 号是标识符，不是词：https、b23.tv、www.bilibili.com、video、bv1xx411c7md 都会
 # 混进词云，而停用词表只能收精确词，覆盖不了域名和随机 BV 号变体。分词前整段剥掉。
+# 链接主体限定 ASCII 可见字符（RFC 3986 的 URI 字符集本就是 ASCII，非 ASCII 要百分号编码）：
+# 用 \S 会连紧贴链接的中日韩文字一起吞掉，「传送门https://b23.tv/abc教程」会整条剥空。
 _NOISE_PATTERN = re.compile(
-    r"https?://\S+|www\.[^\s/]+\S*|\bBV[0-9A-Za-z]{10}\b",
+    r"https?://[!-~]+|www\.[!-~]+|\bBV[0-9A-Za-z]{10}\b",
     re.IGNORECASE,
 )
 

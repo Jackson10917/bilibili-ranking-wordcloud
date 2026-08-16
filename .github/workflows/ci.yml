@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
 
+# 同仓库 PR 会同时触发 push 和 pull_request，16 个 job 白跑两遍。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     strategy:
