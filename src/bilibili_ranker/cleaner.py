@@ -58,13 +58,15 @@ _NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?")
 # b23.tv 单列一支、协议和 www. 都可省，路径可有可无。不加 \b：紧贴中文的裸链（
 # 「看这里bilibili.com/video」）字符两侧都是 \w，加了反而匹配不上；漏出的前缀残片
 # （"ab23.tv" 的 "a"）是单字符，会被 minimum_token_length 丢掉。
+# BV 号边界同理不能用 \b：中文也是 \w 词字符，紧贴中文时边界永不成立、整号漏剥。
+# 改成对 ASCII 字母数字做 lookaround：紧贴汉字能命中，且仍是更长标识符一部分时不误剥。
 # ponytail: 只收 B站自家域名。通配任意 TLD 会误伤「3.5」「vs.」这类正常词元。
 _NOISE_PATTERN = re.compile(
     r"https?://[!-~]+"
     r"|www\.[!-~]+"
     r"|(?:[a-z0-9-]+\.)*bilibili\.com(?:/[!-~]*)?"
     r"|b23\.tv(?:/[!-~]*)?"
-    r"|\bBV[0-9A-Za-z]{10}\b",
+    r"|(?<![0-9A-Za-z])BV[0-9A-Za-z]{10}(?![0-9A-Za-z])",
     re.IGNORECASE,
 )
 

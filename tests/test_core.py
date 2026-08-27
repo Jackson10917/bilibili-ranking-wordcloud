@@ -567,6 +567,20 @@ def test_link_stripping_keeps_adjacent_cjk() -> None:
     assert normalize_title("https://b23.tv/abc?a=1#f") == ""
 
 
+def test_bvid_noise_stripped_adjacent_to_cjk() -> None:
+    # \b 按 Unicode 词符判界，中文字符也算词字符，紧贴中文的 BV 号永远匹配不上，
+    # 噪声 bv1xx411c7md 会整号混进词云。改用 ASCII 边界后相邻汉字必须保留。
+    from bilibili_ranker.cleaner import normalize_title
+
+    analyzer = TitleAnalyzer(load_stopword_policy())
+    record = VideoRankingRecord.from_api_item(
+        {"bvid": "BV1aa0000000", "title": "围观BV1xx411c7mD魔方"}, rank=1
+    )
+    assert analyzer.analyze([record]) == {"围观": 1, "魔方": 1}
+    # 反向约束：作为更长标识符一部分时不能误剥。
+    assert normalize_title("xBV1xx411c7mD") == "xBV1xx411c7mD"
+
+
 def test_japanese_iteration_mark_kept() -> None:
     # 々(U+3005) 归 CJK Symbols 块，不在统一表意文字区间：漏掉会把「人々」整词丢干净。
     policy = load_stopword_policy()
@@ -670,7 +684,7 @@ def test_chinese_function_word_runs_not_kept_whole() -> None:
     """全单字回退分支必须只救日语，不能把中文虚词串整块放进词云。
 
     「他也是」被 jieba 切成三个单字，逐字都是停用词而整块不是，不加判断就会绕过过滤。
-    反向случай：日语汉字词里个别汉字撞上中文停用词（自転車 的「自」、本気 的「本」）时
+    反向情况：日语汉字词里个别汉字撞上中文停用词（自転車 的「自」、本気 的「本」）时
     仍须保留，所以判据是"全部单字都是停用词"，而不是"存在停用词"。
     """
 
