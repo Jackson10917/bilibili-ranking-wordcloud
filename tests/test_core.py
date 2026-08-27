@@ -698,6 +698,10 @@ def test_foreign_domain_links_stripped() -> None:
     assert normalize_title("网盘链接 pan.baidu.com/s/1 密码") == "网盘链接 密码"
     assert normalize_title("弹幕站 acfun.cn/v 投喂") == "弹幕站 投喂"
     assert normalize_title("源码 github.com/x/y 提交") == "源码 提交"
+    # 断言形态不能带 www./http 前缀，否则会被对应的通用分支掩护而失去杀伤力。
+    assert normalize_title("原曲来自 nicovideo.jp/sm9 注") == "原曲来自 注"
+    assert normalize_title("同步 tiktok.com/@id 视频") == "同步 视频"
+    assert normalize_title("微博移动版 weibo.cn/u/123 同人") == "微博移动版 同人"
     # 名单外长尾域名维持不误伤；出现噪声时往 _NOISY_DOMAINS 加一行即可。
     assert normalize_title("小众站 example.org/about 看看") == "小众站 example.org/about 看看"
 
