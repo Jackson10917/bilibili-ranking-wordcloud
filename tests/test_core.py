@@ -1250,6 +1250,221 @@ def test_resource_dir_override_loads_custom_words() -> None:
         assert "ai" not in policy.stopwords
 
 
+def test_cli_rejects_out_of_range_args() -> None:
+    # 尺寸/最大词数/最短词长取 0、语言列表剥空，都属 argparse 层的取值越界，退出码 2。
+    for argv in (
+        ["--width", "0"],
+        ["--height", "-1"],
+        ["--max-words", "0"],
+        ["--minimum-token-length", "0"],
+        ["--languages", " ,,"],
+    ):
+        try:
+            main(argv)
+        except SystemExit as exc:
+            assert exc.code == 2, argv
+        else:
+            raise AssertionError(f"{argv} 应该被拒绝")
+
+
+def test_analyzer_keeps_allowlisted_word() -> None:
+    # allowlist 的短路返回分支此前零覆盖：分析结果里必须保留 ai 这类保留词。
+    analyzer = TitleAnalyzer(load_stopword_policy())
+    record = VideoRankingRecord.from_api_item({"bvid": "BV1aa0000000", "title": "AI 教程"}, rank=1)
+    assert analyzer.analyze([record]) == {"ai": 1, "教程": 1}
+
+
+def test_client_rejects_malformed_api_shapes() -> None:
+    # 响应校验阶梯逐级都有专属错误信息，此前整段零覆盖：接口被代理劫持或字段改名时，
+    # 每一级都要给出可排查的 BilibiliAPIError，而不是 KeyError 逸出。
+    from unittest.mock import patch
+
+    from bilibili_ranker.client import BilibiliAPIError, fetch_all_ranking
+
+    malformed_payloads = [
+        None,  # 200 + 垃圾 body，重试耗尽后仍要报「不是有效 JSON」
+        ["不是", "对象"],  # 根节点不是 JSON 对象
+        {"code": -404, "message": "啥都木有"},  # 业务码非 0
+        {"code": 0},  # 缺 data
+        {"code": 0, "data": {"list": "不是数组"}},
+        {"code": 0, "data": {"list": ["不是对象"]}},
+    ]
+    for payload in malformed_payloads:
+
+        def fake_get(
+            self: requests.Session,
+            url: str,
+            *,
+            _payload: object = payload,
+            **kwargs: object,
+        ) -> requests.Response:
+            return _fake_json_response(_payload, 200)
+
+        with patch.object(requests.Session, "get", fake_get):
+            try:
+                fetch_all_ranking()
+            except BilibiliAPIError:
+                pass
+            else:
+                raise AssertionError(f"畸形响应未被拒绝：{payload!r}")
+
+
+def test_refresh_buvid_silent_on_garbage() -> None:
+    # SPI 响应的各种畸形（非 200、垃圾 JSON、结构不对）都静默跳过，cookie 一个都不写。
+    from unittest.mock import patch
+
+    from bilibili_ranker.client import SPI_API_URL, _refresh_buvid, build_session
+
+    garbage_responses = [
+        _fake_json_response({"code": 0, "data": {"b_3": "b3", "b_4": "b4"}}, 500),
+        _fake_json_response(["不是", "对象"]),
+        _fake_json_response({"code": 0}),
+        _fake_json_response({"code": 0, "data": "不是对象"}),
+    ]
+    # 200 + 坏 JSON 单独构造（helper 只能产合法 JSON），json() 抛 ValueError 后同样静默。
+    invalid_json = requests.Response()
+    invalid_json.status_code = 200
+    invalid_json._content = b"<html>not json</html>"
+    garbage_responses.insert(1, invalid_json)
+    for response in garbage_responses:
+
+        def fake_get(
+            self: requests.Session,
+            url: str,
+            *,
+            _response: requests.Response = response,
+            **kwargs: object,
+        ) -> requests.Response:
+            assert url == SPI_API_URL
+            return _response
+
+        session = build_session()
+        try:
+            with patch.object(requests.Session, "get", fake_get):
+                _refresh_buvid(session, user_agent="ua", timeout_seconds=5.0)
+            assert session.cookies.get_dict() == {}
+        finally:
+            session.close()
+
+
+def test_fetch_reports_persistent_truncation() -> None:
+    # 每一轮 body 都被截断时：重试耗尽后按请求失败上报，且请求总数不超轮次上限。
+    import http.server
+    import threading
+
+    import bilibili_ranker.client as client_module
+    from bilibili_ranker.client import BilibiliAPIError
+
+    counter = {"n": 0}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler 接口
+            counter["n"] += 1
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", "200")
+            self.end_headers()
+            self.wfile.write(b'{"code": 0, "data": {"list": [{"bvid": "BV1aa')
+            self.close_connection = True
+
+        def log_message(self, *_: object) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    original = client_module.RANKING_API_URL
+    client_module.RANKING_API_URL = f"http://127.0.0.1:{server.server_port}/x"
+    try:
+        try:
+            client_module.fetch_all_ranking(timeout_seconds=5)
+        except BilibiliAPIError as exc:
+            assert "请求失败" in str(exc)
+        else:
+            raise AssertionError("持续截断未抛出 BilibiliAPIError")
+        assert counter["n"] == client_module._RISK_CONTROL_ATTEMPTS, counter
+    finally:
+        client_module.RANKING_API_URL = original
+        server.shutdown()
+        server.server_close()
+
+
+def test_lazy_imports_report_friendly_errors() -> None:
+    # jieba / stopwordsiso / wordcloud 缺依赖时都要给出中文安装提示，而不是 ImportError。
+    import sys as _sys
+    from unittest.mock import patch
+
+    from bilibili_ranker.cleaner import _jieba_lcut
+    from bilibili_ranker.stopwords import load_stopword_policy
+    from bilibili_ranker.wordcloud import render_wordcloud
+
+    with patch.dict(_sys.modules, {"jieba": None}):
+        try:
+            _jieba_lcut("测试")
+        except RuntimeError as exc:
+            assert "jieba" in str(exc)
+        else:
+            raise AssertionError("缺 jieba 未报友好错误")
+
+    with patch.dict(_sys.modules, {"stopwordsiso": None}):
+        try:
+            load_stopword_policy()
+        except RuntimeError as exc:
+            assert "stopwordsiso" in str(exc)
+        else:
+            raise AssertionError("缺 stopwordsiso 未报友好错误")
+
+    with patch.dict(_sys.modules, {"wordcloud": None}):
+        try:
+            render_wordcloud({"词": 1}, "unused.png")
+        except RuntimeError as exc:
+            assert "wordcloud" in str(exc)
+        else:
+            raise AssertionError("缺 wordcloud 未报友好错误")
+
+
+def test_font_not_found_when_system_has_none() -> None:
+    # 标准目录与 fontconfig 全部落空时，必须抛带指引的 FontNotFoundError 而非静默返回。
+    from unittest.mock import patch
+
+    from bilibili_ranker import fonts as fonts_module
+    from bilibili_ranker.fonts import FontNotFoundError, resolve_font_path
+
+    with patch.object(fonts_module, "_standard_font_roots", lambda: iter(())):
+        with patch.object(fonts_module.shutil, "which", lambda _: None):
+            try:
+                resolve_font_path(None)
+            except FontNotFoundError as exc:
+                assert "--font-path" in str(exc)
+            else:
+                raise AssertionError("无字体环境未抛出 FontNotFoundError")
+
+
+def test_render_wordcloud_direct_guards() -> None:
+    # 绕过 CLI 直接调 render_wordcloud 时，空词频与非法尺寸都要在导入前被拦下。
+    from bilibili_ranker.wordcloud import render_wordcloud
+
+    for kwargs in (
+        {"frequencies": {}, "output_path": "unused.png"},
+        {"frequencies": {"词": 1}, "output_path": "unused.png", "width": 0},
+        {"frequencies": {"词": 1}, "output_path": "unused.png", "max_words": 0},
+    ):
+        try:
+            render_wordcloud(**kwargs)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"非法参数未被拒绝：{kwargs}")
+
+
+def test_storage_accepts_naive_datetime() -> None:
+    # naive datetime 按 UTC 处理，不抛 NaiveDatetime 相关异常。
+    from bilibili_ranker.storage import create_output_bundle
+
+    with tempfile.TemporaryDirectory() as directory:
+        bundle = create_output_bundle(Path(directory), datetime(2024, 1, 1))
+        assert bundle.ranking_csv.name == "ranking_20240101T000000Z.csv"
+
+
 def test_keyboard_interrupt_exits_130() -> None:
     # Ctrl+C 必须走退出码 130（README 已承诺），不能以 KeyboardInterrupt traceback 收场。
     from unittest.mock import patch
