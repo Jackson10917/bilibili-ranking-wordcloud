@@ -243,6 +243,22 @@ def test_csv_formula_prefix_escaped() -> None:
     assert rows[0]["UP主"] == "'@up"
 
 
+def test_frequency_csv_escaped_and_ordered() -> None:
+    # 词元源自投稿标题，与榜单 CSV 走同一套公式前缀转义；行序沿用传入的降序，
+    # 二次分析按行序取 TopN 时不允许乱序。
+    from bilibili_ranker.storage import write_frequencies_csv
+
+    with tempfile.TemporaryDirectory() as directory:
+        destination = Path(directory) / "freq.csv"
+        write_frequencies_csv(destination, {"=HYPERLINK": 3, "魔方": 1})
+        with destination.open(encoding="utf-8-sig", newline="") as stream:
+            rows = list(csv.DictReader(stream))
+    assert rows[0]["词"] == "'=HYPERLINK"
+    assert rows[0]["词频"] == "3"
+    assert rows[1]["词"] == "魔方"
+    assert rows[1]["词频"] == "1"
+
+
 def _fake_json_response(payload: dict, status_code: int = 200) -> requests.Response:
     response = requests.Response()
     response.status_code = status_code
@@ -1155,8 +1171,8 @@ def test_main_reconfigures_stdout_to_utf8() -> None:
         assert kwargs == {"encoding": "utf-8", "errors": "replace"}
 
 
-def test_cli_success_path_writes_both_outputs() -> None:
-    # 端到端成功路径：summary JSON 字段齐全，CSV 与 PNG 都真实落盘。
+def test_cli_success_path_writes_all_outputs() -> None:
+    # 端到端成功路径：summary JSON 字段齐全，榜单 CSV、词频 CSV 与 PNG 都真实落盘。
     from unittest.mock import patch
 
     import pytest
@@ -1185,9 +1201,13 @@ def test_cli_success_path_writes_both_outputs() -> None:
 
         csv_files = list(Path(directory).glob("ranking_*.csv"))
         png_files = list(Path(directory).glob("wordcloud_*.png"))
-        assert len(csv_files) == 1 and len(png_files) == 1
+        freq_files = list(Path(directory).glob("word_frequency_*.csv"))
+        assert len(csv_files) == 1 and len(png_files) == 1 and len(freq_files) == 1
         assert png_files[0].read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
         assert not list(Path(directory).glob("*.tmp"))
+        with freq_files[0].open(encoding="utf-8-sig", newline="") as stream:
+            freq_rows = list(csv.DictReader(stream))
+        assert {"词": "魔方", "词频": "1"} in freq_rows
 
 
 def test_zero_pubdate_is_missing_not_1970() -> None:
@@ -1226,11 +1246,14 @@ def test_wordcloud_failure_keeps_csv_and_exits_zero() -> None:
             with patch.object(cli_module, "render_wordcloud", boom):
                 assert main(["--output-dir", directory]) == 0
         assert len(list(Path(directory).glob("ranking_*.csv"))) == 1
+        # 词频表先于渲染落盘：降级路径下机器可读产物必须仍然在。
+        assert len(list(Path(directory).glob("word_frequency_*.csv"))) == 1
         assert not list(Path(directory).glob("wordcloud_*.png"))
 
 
 def test_empty_frequencies_still_writes_csv() -> None:
-    # 标题清洗后无词元（全是停用词/表情）时只输出 CSV，退出码仍为 0。
+    # 标题清洗后无词元（全是停用词/表情）时只输出榜单 CSV，退出码仍为 0；
+    # 词频 CSV 没有内容可写，不产出空表文件。
     from unittest.mock import patch
 
     import bilibili_ranker.cli as cli_module
@@ -1246,6 +1269,7 @@ def test_empty_frequencies_still_writes_csv() -> None:
             assert main(["--output-dir", directory]) == 0
         assert len(list(Path(directory).glob("ranking_*.csv"))) == 1
         assert not list(Path(directory).glob("wordcloud_*.png"))
+        assert not list(Path(directory).glob("word_frequency_*.csv"))
 
 
 def test_output_bundle_releases_placeholder_when_png_taken() -> None:

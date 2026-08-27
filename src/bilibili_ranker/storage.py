@@ -18,6 +18,7 @@ from .models import VideoRankingRecord
 class OutputBundle:
     ranking_csv: Path
     wordcloud_png: Path
+    word_frequency_csv: Path
 
 
 def _utc_label(value: datetime) -> str:
@@ -32,6 +33,7 @@ def create_output_bundle(root: str | Path, fetched_at: datetime) -> OutputBundle
     base.mkdir(parents=True, exist_ok=True)
     ranking_csv = base / f"ranking_{label}.csv"
     wordcloud_png = base / f"wordcloud_{label}.png"
+    word_frequency_csv = base / f"word_frequency_{label}.csv"
     # 同一秒内多次运行会重名，追加 -2/-3 后缀。用 O_CREAT|O_EXCL 原子占位 CSV 而不是
     # exists()：后者在"检查"和"写入"之间有窗口，同秒并发的两个进程会拿到同一编号，
     # 后写者的 os.replace 直接覆盖先写者的结果。PNG 只做存在性检查，跟随 CSV 的编号
@@ -44,11 +46,16 @@ def create_output_bundle(root: str | Path, fetched_at: datetime) -> OutputBundle
             pass
         else:
             if not wordcloud_png.exists():
-                return OutputBundle(ranking_csv=ranking_csv, wordcloud_png=wordcloud_png)
+                return OutputBundle(
+                    ranking_csv=ranking_csv,
+                    wordcloud_png=wordcloud_png,
+                    word_frequency_csv=word_frequency_csv,
+                )
             # PNG 已被占用：撤掉刚占位的空 CSV，整对跳号。
             ranking_csv.unlink(missing_ok=True)
         ranking_csv = base / f"ranking_{label}-{counter}.csv"
         wordcloud_png = base / f"wordcloud_{label}-{counter}.png"
+        word_frequency_csv = base / f"word_frequency_{label}-{counter}.csv"
         counter += 1
 
 
@@ -134,3 +141,13 @@ def write_records_csv(destination: Path, records: Iterable[VideoRankingRecord]) 
         RANKING_CSV_HEADERS,
         (_record_to_csv_row(record) for record in records),
     )
+
+
+# 词频表是机器可读产物：PNG 只适合人眼，趋势与对比分析需要精确计数。词来自投稿
+# 标题（用户可控），与榜单 CSV 走同一套公式前缀转义。行序沿用传入字典的降序。
+FREQUENCY_CSV_HEADERS = ("词", "词频")
+
+
+def write_frequencies_csv(destination: Path, frequencies: Mapping[str, int | float]) -> Path:
+    rows = ({"词": _spreadsheet_safe(word), "词频": count} for word, count in frequencies.items())
+    return _atomic_csv_write(destination, FREQUENCY_CSV_HEADERS, rows)
