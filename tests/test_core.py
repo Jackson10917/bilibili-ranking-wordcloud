@@ -1,9 +1,7 @@
 """回归检查：去重、停用词、分词、排行榜请求重试与 CSV 原子写入。
 
-依赖项目本体可导入（按 README 以 editable 方式安装即可）。由 pytest 收集运行：
+依赖项目本体可导入（按 README 以 editable 方式安装即可）。统一由 pytest 收集运行：
 python -m pytest tests
-也可直接运行 python tests/test_core.py，但聚合器同样依赖 pytest（用于 skip 语义），
-需先安装 `pip install -e ".[test]"`。
 """
 
 from __future__ import annotations
@@ -156,6 +154,20 @@ def test_parse_ranking_records_tolerance() -> None:
     # 非整型 float 拒绝，整型 float 可解析。
     assert records[2].view_count is None
     assert records[2].coin_count == 2
+
+
+def test_real_response_fixture_parses_cleanly() -> None:
+    # 手写 dict 只覆盖想象中的形状；fixtures 里是真实响应的前 5 条 items 原样截取
+    # （信封按接口契约最小重构），上游字段改名或结构漂移在这里先于线上暴露。
+    fixture = Path(__file__).resolve().parent / "fixtures" / "ranking_v2_sample.json"
+    payload = json.loads(fixture.read_text(encoding="utf-8"))
+    items = payload["data"]["list"]
+    records, rejected = parse_ranking_records(items)
+    assert rejected == 0
+    assert len(records) == len(items) >= 5
+    assert all(record.bvid.startswith("BV") for record in records)
+    assert records[0].view_count is not None
+    assert records[0].title
 
 
 def test_accented_latin_tokens() -> None:
@@ -1804,24 +1816,3 @@ def test_rid_passes_through_to_query_string() -> None:
 
     assert result.items == ()
     assert parse_qs(ranking_paths[0].split("?", 1)[1]) == {"rid": ["4"], "type": ["all"]}
-
-
-if __name__ == "__main__":
-    import pytest as _pytest
-
-    # 动态收集，避免手工罗列漏掉新测试导致静默漏跑。
-    # pytest.skip() 抛 _pytest.outcomes.Skipped，不捕获会中断循环导致后续测试静默漏跑。
-    # 断言失败也不能中断：否则第一条失败之后的测试全部静默漏跑，最后仍打印 ok。
-    _failures: list[str] = []
-    for _name, _function in sorted(globals().items()):
-        if _name.startswith("test_") and callable(_function):
-            try:
-                _function()
-            except _pytest.skip.Exception as _e:
-                print(f"SKIP {_name}: {_e}")
-            except BaseException as _e:  # noqa: BLE001 - 聚合报告，最后再退出
-                print(f"FAIL {_name}: {type(_e).__name__}: {_e}")
-                _failures.append(_name)
-    if _failures:
-        raise SystemExit(f"{len(_failures)} 个测试失败：{', '.join(_failures)}")
-    print("ok")
