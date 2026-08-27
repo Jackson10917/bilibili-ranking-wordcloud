@@ -81,7 +81,13 @@ def normalize_title(title: str) -> str:
         if unicodedata.category(character) != "Cf"
     )
     # 剥噪声在剔除零宽字符之后：链接里插了零宽字符时正则同样能命中。
-    return " ".join(_NOISE_PATTERN.sub(" ", normalized).split())
+    # 多种噪声直接拼接时单趟替换会露出新的可剥片段（如 BV 号后紧跟 www.x.com，
+    # 右边界被 w 挡住而漏剥），所以反复剥到不再变化。每次替换都单调缩短文本，必终止。
+    while True:
+        stripped = _NOISE_PATTERN.sub(" ", normalized)
+        if stripped == normalized:
+            return " ".join(stripped.split())
+        normalized = stripped
 
 
 def deduplicate_records(

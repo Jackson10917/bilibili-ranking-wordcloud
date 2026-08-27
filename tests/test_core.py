@@ -579,6 +579,9 @@ def test_bvid_noise_stripped_adjacent_to_cjk() -> None:
     assert analyzer.analyze([record]) == {"围观": 1, "魔方": 1}
     # 反向约束：作为更长标识符一部分时不能误剥。
     assert normalize_title("xBV1xx411c7mD") == "xBV1xx411c7mD"
+    # 两种噪声直接拼接时单趟替换会露出新的可剥片段：BV 右边界被 w 挡住，
+    # 随后 www 吃掉域名，留下整个 BV 号。必须反复剥到不再变化。
+    assert normalize_title("BV1aa0000000www.bilibili.com") == ""
 
 
 def test_japanese_iteration_mark_kept() -> None:
@@ -1141,6 +1144,7 @@ def test_keyboard_interrupt_exits_130() -> None:
             assert main(["--output-dir", directory]) == 130
 
 
+ (fix: 拼接噪声漏剥收敛到不动点；编码降级测试脱离真实渲染)
 def test_failed_run_removes_empty_placeholder_csv() -> None:
     # create_output_bundle 的 O_EXCL 占位若在 write_records_csv 之前崩溃，会永久残留
     # 0 字节 CSV 并占掉编号（下次运行跳到 -2）。失败路径必须清理空占位。
