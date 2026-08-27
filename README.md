@@ -2,6 +2,10 @@
 
 抓取B站排行榜，将榜单整理为CSV，并根据视频标题生成词云图。
 
+![词云示例](assets/wordcloud-sample.png)
+
+上图是一次全站榜运行的实际输出：中文按 jieba 分词，链接、BV 号、Emoji 与纯数字不入词，多语言停用词过滤后渲染。
+
 ## 功能
 
 - 请求B站排行榜接口（瞬时网络故障自动重试，被风控拦截时刷新 buvid 后重试），记录数量以接口实际返回为准，支持全站榜和分区榜（`--rid`）；
@@ -33,6 +37,8 @@
 │     └─ README.md
 ├─ tests/
 │  └─ test_core.py
+├─ assets/
+│  └─ wordcloud-sample.png
 ├─ .gitignore
 ├─ LICENSE
 ├─ pyproject.toml
@@ -185,6 +191,11 @@ https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all
 ```
 
 `--rid` 把查询串里的 `rid` 换成对应分区 ID 即为分区榜（默认 0 全站）。分区 ID 的取值集合由上游接口定义，本项目只做透传；接口对某个 rid 返回空榜或错误时，工具会如实报错退出（退出码 1），不会回退到全站榜。
+
+## 已知边界
+
+- 默认 User-Agent 是写死的现代 Chrome 指纹，会随浏览器版本演进而过时。请求被风控拦截且重试无效时，优先尝试用 `BILIBILI_UA` 覆盖为当前浏览器版本。
+- 风控处理建立在 ranking v2 接口当前不需要 WBI 签名的行为上：`-352`/HTTP 412 时刷新 buvid cookie 重试。上游一旦对接口加签，这条路会失效，届时需要实现 WBI 签名。
 
 ## 许可证
 

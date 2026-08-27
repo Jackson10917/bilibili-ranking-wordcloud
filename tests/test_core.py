@@ -1,6 +1,6 @@
 """回归检查：去重、停用词、分词、排行榜请求重试与 CSV 原子写入。
 
-需要已安装项目依赖（jieba、stopwordsiso）。由 pytest 收集运行：
+依赖项目本体可导入（按 README 以 editable 方式安装即可）。由 pytest 收集运行：
 python -m pytest tests
 也可直接运行 python tests/test_core.py，但聚合器同样依赖 pytest（用于 skip 语义），
 需先安装 `pip install -e ".[test]"`。
@@ -17,8 +17,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from bilibili_ranker.cleaner import TitleAnalyzer, deduplicate_records
 from bilibili_ranker.cli import main
@@ -64,8 +62,8 @@ def test_deduplicate_records() -> None:
 
 
 def test_from_api_item_maps_every_field() -> None:
-    # 变异测试发现 16 个字段里 9 个的 API 字段名映射零断言：上游改名时测试照旧
-    # 全绿而 CSV 整列变空。逐字段锁死映射、video_url 拼装与发布时间转换。
+    # 逐字段锁死 API 字段名映射、video_url 拼装与发布时间转换：上游改字段名时，
+    # 缺断言的字段会让测试照旧全绿而 CSV 整列静默变空。
     item = {
         "bvid": "BV1aa0000000",
         "title": "标题",
@@ -707,8 +705,8 @@ def test_foreign_domain_links_stripped() -> None:
 
 
 def test_noisy_domain_list_is_fully_exercised() -> None:
-    # 数据驱动：名单里每一条域名都必须真实生效——变异测试显示新增条目容易
-    # 出现「加了名单没加测试」的死条目，这里随名单增长自动全覆盖。
+    # 数据驱动：名单里每一条域名都必须真实生效——新增条目容易出现
+    # 「加了名单没加测试」的死条目，这里随名单增长自动全覆盖。
     import bilibili_ranker.cleaner as cleaner_module
     from bilibili_ranker.cleaner import normalize_title
 
@@ -1370,7 +1368,7 @@ def test_missing_resource_dir_exits_one() -> None:
 
 
 def test_resource_dir_override_loads_custom_words() -> None:
-    # README 承诺 --resource-dir 覆盖内置停用词目录，正向路径此前零覆盖：
+    # README 承诺 --resource-dir 覆盖内置停用词目录，这里锁正向路径：
     # str 与 Path 两种入参都要能加载，自定义词整体替换目录而非追加。
     import shutil
 
@@ -1420,14 +1418,14 @@ def test_cli_rejects_out_of_range_args() -> None:
 
 
 def test_analyzer_keeps_allowlisted_word() -> None:
-    # allowlist 的短路返回分支此前零覆盖：分析结果里必须保留 ai 这类保留词。
+    # allowlist 的短路返回分支：分析结果里必须保留 ai 这类保留词。
     analyzer = TitleAnalyzer(load_stopword_policy())
     record = VideoRankingRecord.from_api_item({"bvid": "BV1aa0000000", "title": "AI 教程"}, rank=1)
     assert analyzer.analyze([record]) == {"ai": 1, "教程": 1}
 
 
 def test_client_rejects_malformed_api_shapes() -> None:
-    # 响应校验阶梯逐级都有专属错误信息，此前整段零覆盖：接口被代理劫持或字段改名时，
+    # 响应校验阶梯逐级都有专属错误信息：接口被代理劫持或字段改名时，
     # 每一级都要给出可排查的 BilibiliAPIError，而不是 KeyError 逸出。
     from unittest.mock import patch
 

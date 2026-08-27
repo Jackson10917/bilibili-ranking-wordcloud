@@ -49,7 +49,7 @@ jobs:
       - run: ruff check .
       - run: ruff format --diff .
 
-  # 全项目函数都有完整注解但此前没有静态验证；按最低支持版本 3.10 检查（见
+  # 注解必须被静态验证，否则会随代码腐烂而无人察觉；按最低支持版本 3.10 检查（见
   # pyproject 的 [tool.mypy]），避免只在最新 Python 上才暴露的 API 误用混进主干。
   typecheck:
     runs-on: ubuntu-latest
