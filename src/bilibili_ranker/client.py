@@ -130,11 +130,9 @@ def fetch_all_ranking(
     try:
         last_response: requests.Response | None = None
         for attempt in range(_RISK_CONTROL_ATTEMPTS):
-            # 连接在 body 读取阶段被截断（IncompleteRead 的 requests 包装
-            # ChunkedEncodingError）与截断的垃圾 body 同属瞬时 CDN 故障。stream=False
-            # 时 body 在 get() 内部就已读完、异常从这里抛出，而 urllib3 Retry 只管到
-            # 响应到达为止，不覆盖这个阶段，所以在原轮次上限内重试、不叠乘。最后一轮
-            # 仍失败才交给外层包装成 BilibiliAPIError。
+            # ChunkedEncodingError 是 body 在 get() 内部读完时被截断抛出的，urllib3 Retry
+            # 只管到响应到达为止、不覆盖这个阶段，所以在原轮次上限内重试、不叠乘；
+            # 最后一轮仍失败才交给外层包装成 BilibiliAPIError。
             try:
                 response = session.get(
                     RANKING_API_URL,

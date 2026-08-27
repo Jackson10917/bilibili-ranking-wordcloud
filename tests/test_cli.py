@@ -334,11 +334,15 @@ def test_explicit_font_errors_surface_before_network() -> None:
 def test_cli_aggregate_merges_history_and_skips_itself() -> None:
     # --aggregate 把目录里已有词频 CSV 与本次结果按词求和；聚合产物自身必须排除，
     # 否则第二次 --aggregate 会把上次的累计值整个再翻一倍。
+    # 词云是「替代」而非「额外」：只渲染累计词云，时间戳词云不产出（README 已如此承诺）。
     from unittest.mock import patch
 
     import bilibili_ranker.cli as cli_module
     from bilibili_ranker.client import RankingFetchResult
-    from bilibili_ranker.storage import AGGREGATE_FREQUENCY_CSV_NAME
+    from bilibili_ranker.storage import (
+        AGGREGATE_FREQUENCY_CSV_NAME,
+        AGGREGATE_WORDCLOUD_PNG_NAME,
+    )
 
     def fetched_on(day: int) -> RankingFetchResult:
         return RankingFetchResult(
@@ -346,8 +350,13 @@ def test_cli_aggregate_merges_history_and_skips_itself() -> None:
             items=({"bvid": "BV1aa0000000", "title": "魔方教程 魔方"},),
         )
 
-    def fake_render(*_: object, **__: object) -> Path:
-        raise RuntimeError("找不到字体")
+    destinations: list[Path] = []
+
+    def fake_render(*args: object, **__: object) -> Path:
+        destination = Path(str(args[1]))
+        destinations.append(destination)
+        destination.write_bytes(b"\x89PNG\r\n\x1a\n")
+        return destination
 
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -370,6 +379,8 @@ def test_cli_aggregate_merges_history_and_skips_itself() -> None:
             counts = {row["词"]: row["词频"] for row in csv.DictReader(stream)}
         # 两份历史 + 本次标题（魔方+2、教程+1）。
         assert counts == {"魔方": "4", "教程": "1", "模型": "3"}
+        assert destinations == [root / AGGREGATE_WORDCLOUD_PNG_NAME]
+        assert not list(root.glob("wordcloud_2024*.png"))
 
         # 第二次运行：历史里多了第一轮的时间戳词频 CSV，按词继续累加；
         # 若聚合产物没被排除，魔方会变成 10。
@@ -384,3 +395,4 @@ def test_cli_aggregate_merges_history_and_skips_itself() -> None:
                 "教程": "2",
                 "模型": "3",
             }
+        assert destinations == [root / AGGREGATE_WORDCLOUD_PNG_NAME] * 2

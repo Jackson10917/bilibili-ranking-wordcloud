@@ -50,26 +50,17 @@ _CHUNK_PATTERN = re.compile(
 _CJK_PATTERN = re.compile(rf"[{_CJK_RANGE}]+")
 _NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?")
 
-# 两个以上 bvid 无分隔直接堆叠（如「BV1aa0000000BV1bb1111111」）时剥噪声管不到：
-# 每个 BV 号的右边界都被下一个 B 挡住。但这类串进入词元的形状是唯一的——整体是
-# 「bv+10 位字母数字」的重复（长度必为 12 的倍数），自然语言的词没有这种形状，
-# 整体丢弃不会误伤正常内容；写进 CSV 前的实际 BV 号另有 fullmatch 校验，不受影响。
+# 多个 BV 号无分隔堆叠时每个号的右边界都被下一个 B 挡住、剥噪声管不到；但整串形状是
+# 「bv+10 位字母数字」的重复，自然语言的词没有这种形状，整体丢弃不误伤。
 _BVID_STACK_PATTERN = re.compile(r"(?:bv[0-9a-z]{10})+", re.IGNORECASE)
 
 
-# 链接和 BV 号是标识符，不是词：https、b23.tv、www.bilibili.com、video、bv1xx411c7md 都会
-# 混进词云，而停用词表只能收精确词，覆盖不了域名和随机 BV 号变体。分词前整段剥掉。
-# 链接主体限定 ASCII 可见字符（RFC 3986 的 URI 字符集本就是 ASCII，非 ASCII 要百分号编码）：
-# 用 \S 会连紧贴链接的中日韩文字一起吞掉，「传送门https://b23.tv/abc教程」会整条剥空。
-# B站标题里的链接大多是无协议裸链（「点击 b23.tv/abc 看教程」），所以 bilibili.com 与
-# b23.tv 单列一支、协议和 www. 都可省，路径可有可无；查询串直接挂在裸域名后
-# （「bilibili.com?from=tag」）同样要吃掉，可选后缀得收 ?。不加 \b：紧贴中文的裸链（
-# 「看这里bilibili.com/video」）字符两侧都是 \w，加了反而匹配不上；漏出的前缀残片
-# （"ab23.tv" 的 "a"）是单字符，会被 minimum_token_length 丢掉。
-# BV 号边界同理不能用 \b：中文也是 \w 词字符，紧贴中文时边界永不成立、整号漏剥。
-# 改成对 ASCII 字母数字做 lookaround：紧贴汉字能命中，且仍是更长标识符一部分时不误剥。
-# 域名一律显式名单、不通配 TLD——通配会误伤「3.5」「vs.」这类正常词元。名单外的
-# 域名出现在词云噪声里时，往 _NOISY_DOMAINS 加一行即可。
+# 链接和 BV 号是标识符不是词，停用词表只能收精确词、盖不住域名和随机 BV 号，分词前整段剥掉。
+# 主体限定 ASCII 可见字符（RFC 3986 本就是 ASCII）：\S 会把紧贴链接的中日韩文字一起吞掉。
+# B站标题多是无协议裸链，bilibili.com 与 b23.tv 单列一支、协议和 www. 可省，路径和挂在
+# 裸域名后的查询串一并吃掉。边界不用 \b——CJK 也是 \w 词字符，紧贴中文时永不成立——
+# 改对 ASCII 字母数字做 lookaround。域名显式名单、不通配 TLD，避免误伤正常词元；
+# 名单外的域名出现噪声时往 _NOISY_DOMAINS 加一行即可。
 _NOISY_DOMAINS = (
     # B站自家。
     "bilibili.com",
@@ -100,16 +91,15 @@ _NOISE_PATTERN = re.compile(
 
 def normalize_title(title: str) -> str:
     # NFKC 不动 Cf 类不可见字符（U+200B 零宽空格、U+FEFF、U+00AD 软连字符），它们也不是
-    # str.split() 认的空白。B 站"防和谐"标题「黑​丝」会被劈成两个单字块，双双被
-    # minimum_token_length 丢掉；拉丁词同样被截断。归一化时一并剔除。
+    # 空白：「防和谐」标题「黑​丝」会被劈成单字块双双被 minimum_token_length 丢掉，
+    # 拉丁词同样被截断，归一化时一并剔除。
     normalized = "".join(
         character
         for character in unicodedata.normalize("NFKC", title)
         if unicodedata.category(character) != "Cf"
     )
-    # 剥噪声在剔除零宽字符之后：链接里插了零宽字符时正则同样能命中。
-    # 多种噪声直接拼接时单趟替换会露出新的可剥片段（如 BV 号后紧跟 www.x.com，
-    # 右边界被 w 挡住而漏剥），所以反复剥到不再变化。每次替换都单调缩短文本，必终止。
+    # 剥噪声在剔除零宽字符之后（链接里插了零宽字符时正则同样能命中）。多种噪声直接
+    # 拼接时单趟替换会露出新的可剥片段，反复剥到不再变化；每次替换单调缩短，必终止。
     while True:
         stripped = _NOISE_PATTERN.sub(" ", normalized)
         if stripped == normalized:
@@ -160,14 +150,11 @@ class TitleAnalyzer:
                 pieces = _jieba_lcut(chunk)
                 tokens.extend(pieces)
                 # jieba 只有中文词典，日文汉字词（実況、洗濯）会被全切成单字后被
-                # minimum_token_length 丢干净。全单字说明词典没命中，整块也留一份。
-                # 但 --minimum-token-length 1 时单字本来就能存活，整块再留一份会让
-                # 同一处文本计两次（実/況/実況 各一份），此时不回退。
-                # 中文虚词串（「他也是」「和你的」）整块会绕过停用词过滤混进词云，
-                # 全部单字都是停用词才判定为虚词串丢弃：日语汉字词里就算有个别汉字
-                # 撞上中文停用词（自転車 的「自」、本気 的「本」），也不会整块都撞上。
-                # 已知上限：这个启发式判不出全部中日虚词边界；精确切日语需要
-                # mecab/UniDic 这类重依赖，按「不为边角引入重依赖」的取舍不做。
+                # minimum_token_length 丢干净，整块补留一份；--minimum-token-length 1
+                # 时单字本就能存活，再留整块会同处文本计两次，不回退。中文虚词串
+                # （「他也是」）整块会绕过停用词过滤，全部单字都是停用词才判为虚词串
+                # 丢弃；日语汉字词只个别字撞中文停用词（自転車的「自」），不受影响。
+                # 已知上限：精确切日语需 mecab/UniDic 重依赖，不为边角引入。
                 if (
                     self._minimum_token_length > 1
                     and len(chunk) > 1

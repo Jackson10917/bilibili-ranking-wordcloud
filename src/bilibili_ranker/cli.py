@@ -69,7 +69,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--aggregate",
         action="store_true",
-        help="合并输出目录已有词频 CSV，额外输出累计词频 CSV 与按累计词频渲染的词云",
+        help="合并输出目录已有词频 CSV，输出累计词频 CSV 与按累计词频渲染的词云"
+        "（替代本次时间戳词云）",
     )
     return parser
 
