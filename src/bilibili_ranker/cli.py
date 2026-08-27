@@ -16,7 +16,7 @@ from .client import MAX_TIMEOUT_SECONDS, fetch_all_ranking
 from .fonts import resolve_font_path
 from .models import parse_ranking_records
 from .stopwords import DEFAULT_LANGUAGES, load_stopword_policy
-from .storage import create_output_bundle, write_records_csv
+from .storage import create_output_bundle, write_frequencies_csv, write_records_csv
 from .wordcloud import render_wordcloud
 
 
@@ -115,7 +115,10 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     frequencies = analyzer.analyze(accepted)
 
     generated_wordcloud: Path | None = None
+    frequency_csv: Path | None = None
     if frequencies:
+        # 词频表先于渲染落盘：渲染降级成仅警告时，机器可读的产物仍然在。
+        frequency_csv = write_frequencies_csv(bundle.word_frequency_csv, frequencies)
         try:
             generated_wordcloud = render_wordcloud(
                 frequencies,
@@ -136,6 +139,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         "有效条数": len(accepted),
         "拒绝条数": rejected_count,
         "排行榜CSV": str(bundle.ranking_csv.resolve()),
+        "词频CSV": str(frequency_csv.resolve()) if frequency_csv else None,
         "词云": str(generated_wordcloud) if generated_wordcloud else None,
     }
 
