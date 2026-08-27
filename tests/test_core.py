@@ -1402,13 +1402,14 @@ def test_resource_dir_override_loads_custom_words() -> None:
 
 
 def test_cli_rejects_out_of_range_args() -> None:
-    # 尺寸/最大词数/最短词长取 0、语言列表剥空，都属 argparse 层的取值越界，退出码 2。
+    # 尺寸/最大词数/最短词长取 0、语言列表剥空、rid 为负，都属 argparse 层的取值越界，退出码 2。
     for argv in (
         ["--width", "0"],
         ["--height", "-1"],
         ["--max-words", "0"],
         ["--minimum-token-length", "0"],
         ["--languages", " ,,"],
+        ["--rid", "-1"],
     ):
         try:
             main(argv)
@@ -1708,6 +1709,103 @@ def test_version_exported() -> None:
 
     assert isinstance(bilibili_ranker.__version__, str)
     assert bilibili_ranker.__version__
+
+
+def test_explicit_font_errors_surface_before_network() -> None:
+    # --font-path / BILIBILI_WORDCLOUD_FONT 是用户显式输入，路径写错一个字母时必须与
+    # 停用词错误同理在发请求前退出 1；若被词云阶段的降级吞成警告（退出码 0），定时任务
+    # 会把没有词云的一次运行误判为成功。自动探测失败才保留「仅警告」降级。
+    import os
+    from unittest.mock import patch
+
+    import bilibili_ranker.cli as cli_module
+
+    def boom(**_: object) -> object:
+        raise AssertionError("显式字体路径无效时不应该发起网络请求")
+
+    with tempfile.TemporaryDirectory() as directory:
+        typo = str(Path(directory) / "typo.ttf")
+        with patch.object(cli_module, "fetch_all_ranking", boom):
+            assert main(["--output-dir", directory, "--font-path", typo]) == 1
+
+            old = os.environ.get("BILIBILI_WORDCLOUD_FONT")
+            try:
+                os.environ["BILIBILI_WORDCLOUD_FONT"] = typo
+                assert main(["--output-dir", directory]) == 1
+            finally:
+                if old is None:
+                    os.environ.pop("BILIBILI_WORDCLOUD_FONT", None)
+                else:
+                    os.environ["BILIBILI_WORDCLOUD_FONT"] = old
+
+
+def test_client_rejects_negative_rid() -> None:
+    # 非法 rid 与非法 timeout 同类：公共 API 入口先挡下，且绝不发起网络请求。
+    from unittest.mock import patch
+
+    import bilibili_ranker.client as client_module
+    from bilibili_ranker.client import BilibiliAPIError
+
+    def boom(*args: object, **kwargs: object) -> object:
+        raise AssertionError("非法 rid 不应该发起网络请求")
+
+    with patch.object(requests.Session, "get", boom):
+        try:
+            client_module.fetch_all_ranking(rid=-1)
+        except BilibiliAPIError as exc:
+            assert "-1" in str(exc)
+        else:
+            raise AssertionError("负数 rid 未被拒绝")
+
+
+def test_rid_passes_through_to_query_string() -> None:
+    # 分区透传必须真的落进 query：若写死回 rid=0，选了分区也会静默抓成全站榜。
+    # 单次成功响应即可，重试语义由其他测试覆盖。
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import parse_qs
+
+    from bilibili_ranker import client as client_module
+
+    ranking_paths: list[str] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args: object) -> None:
+            pass
+
+        def do_GET(self) -> None:
+            if self.path.startswith("/spi"):
+                body, status = {"code": 0, "data": {"b_3": "b3", "b_4": "b4"}}, 200
+            else:
+                ranking_paths.append(self.path)
+                body, status = {"code": 0, "data": {"list": []}}, 200
+            payload = json.dumps(body).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    host, port = server.server_address[0], server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    original_ranking = client_module.RANKING_API_URL
+    original_spi = client_module.SPI_API_URL
+    try:
+        client_module.RANKING_API_URL = f"http://{host}:{port}/ranking"
+        client_module.SPI_API_URL = f"http://{host}:{port}/spi"
+        result = client_module.fetch_all_ranking(timeout_seconds=5.0, rid=4)
+    finally:
+        client_module.RANKING_API_URL = original_ranking
+        client_module.SPI_API_URL = original_spi
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert result.items == ()
+    assert parse_qs(ranking_paths[0].split("?", 1)[1]) == {"rid": ["4"], "type": ["all"]}
 
 
 if __name__ == "__main__":

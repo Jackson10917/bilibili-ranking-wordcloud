@@ -4,7 +4,7 @@
 
 ## 功能
 
-- 请求B站排行榜接口（瞬时网络故障自动重试，被风控拦截时刷新 buvid 后重试），记录数量以接口实际返回为准；
+- 请求B站排行榜接口（瞬时网络故障自动重试，被风控拦截时刷新 buvid 后重试），记录数量以接口实际返回为准，支持全站榜和分区榜（`--rid`）；
 - 按BV号去重并输出CSV；
 - 提取标题片段；
 - 使用 `jieba` 进行分词；
@@ -90,6 +90,8 @@ python -m bilibili_ranker --output-dir output
 --max-words 300                词云图最大词数
 --timeout 15                   API 请求超时秒数，取值大于 0 且不超过 86400（0、负数、
                                inf/nan 或超大值都会直接拒绝）
+--rid 0                        排行榜分区 ID；0 为全站榜，其余为上游定义的分区 rid
+                               （如 1 动画、4 游戏），语义跟随上游接口
 ```
 
 ## 输出
@@ -111,11 +113,11 @@ CSV 使用 `utf-8-sig` 编码，可直接使用 Excel 打开。标题和 UP 主�
 | 码 | 含义 |
 | --- | --- |
 | 0 | 成功（含「只输出 CSV」的降级情况） |
-| 1 | 运行期失败：网络/风控、整榜解析失败、语言代码不被支持、`--resource-dir` 缺文件 |
+| 1 | 运行期失败：网络/风控、整榜解析失败、语言代码不被支持、`--resource-dir` 缺文件、显式指定的字体（`--font-path`/环境变量）不可用 |
 | 2 | argparse 参数格式错误：未知参数、类型不符、`--timeout`/`--width`/`--height`/`--max-words`/`--minimum-token-length` 取值越界 |
 | 130 | Ctrl+C 中断 |
 
-注意 `--languages zh,xx` 与 `--resource-dir` 缺文件属于「值有效但资源不可用」，在流程内报错，退出码是 1 而非 2。
+注意 `--languages zh,xx`、`--resource-dir` 缺文件与显式指定的字体不可用，同属「值有效但资源不可用」，在流程内报错，退出码是 1 而非 2。显式指定的字体在发起抓取之前就完成校验，失败时不会写任何文件。
 
 ## CSV 字段
 
@@ -161,7 +163,7 @@ Emoji、标点及其他符号不参与词频统计。标题中只有 Emoji 或�
 3. 系统中的 Noto Sans CJK、思源黑体、微软雅黑、黑体、苹方或文泉驿字体；
 4. Linux `fontconfig` 返回的字体。
 
-Linux 推荐安装 Noto Sans CJK。仓库不包含专有字体文件。显式指定的字体（`--font-path` 或 `BILIBILI_WORDCLOUD_FONT`）会校验后缀与 sfnt 容器魔数，并用 PIL 试载做深度校验，内容损坏时直接报错，不会拖到渲染阶段；自动查找只确认候选字体文件存在，不检查完整字形覆盖，若词云出现缺字，请使用 `--font-path` 指定包含所需字符的字体。
+Linux 推荐安装 Noto Sans CJK。仓库不包含专有字体文件。显式指定的字体（`--font-path` 或 `BILIBILI_WORDCLOUD_FONT`）会校验后缀与 sfnt 容器魔数，并用 PIL 试载做深度校验；校验在抓取开始前完成，路径错误或内容损坏直接退出码 1，不会先抓完榜单再降级。自动探测失败则按可降级的环境问题处理：只输出 CSV 并给出警告。自动查找只确认候选字体文件存在，不检查完整字形覆盖，若词云出现缺字，请使用 `--font-path` 指定包含所需字符的字体。
 
 `.ttc` 是字体集合容器，内部按语言分多个 face。`wordcloud` 调用 PIL 时不传 `index`，恒取 face 0——`NotoSansCJK-Regular.ttc` 的 face 0 是日文，简体汉字会以日文字形变体渲染（如「直」「骨」的写法差异），不是缺字。候选列表已把单体 `NotoSansCJKsc-Regular.otf` 排在 `.ttc` 之前；Debian 系的 `fonts-noto-cjk` 只提供 `.ttc`，若在意字形，用 `--font-path` 指定单体 SC 字体（`NotoSansSC-Regular.otf` 等）。
 
@@ -181,6 +183,8 @@ Linux 推荐安装 Noto Sans CJK。仓库不包含专有字体文件。显式指
 ```
 https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all
 ```
+
+`--rid` 把查询串里的 `rid` 换成对应分区 ID 即为分区榜（默认 0 全站）。分区 ID 的取值集合由上游接口定义，本项目只做透传；接口对某个 rid 返回空榜或错误时，工具会如实报错退出（退出码 1），不会回退到全站榜。
 
 ## 许可证
 

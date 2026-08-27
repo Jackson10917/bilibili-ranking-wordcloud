@@ -11,6 +11,9 @@ requires-python = ">=3.10"
 license = "MIT"
 dependencies = [
   "jieba>=0.42,<1",
+  # fonts.py 直接 import PIL（校验与渲染同一条加载路径），此前全靠 wordcloud 传递带入，
+  # 上游换掉渲染后端就会断；下界 9 是首个正式支持 Python 3.10 的版本线。
+  "pillow>=9,<13",
   "requests>=2.31,<3",
   "stopwordsiso>=0.7,<1",
   "urllib3>=1.26,<3",
@@ -28,7 +31,11 @@ bilibili-rank = "bilibili_ranker.cli:main"
 # <10 上界放开到含修复 PYSEC-2026-1845 的 9.0.3+（共享 UNIX 主机的本地提权/DoS）；
 # 全套测试在 9.x 下实测通过，CI 矩阵按最新解析版本持续验证。
 test = ["hypothesis>=6,<7", "pytest>=7,<10"]
-lint = ["ruff==0.16.4"]
+# numpy 只在类型检查环境出现上限：它是 wordcloud 经 matplotlib 带入的传递依赖，本项目代码
+# 从不 import；但 2.5 起的内联存根用了 PEP 695（type）语法，mypy 按 python_version=3.10
+# 解析会直接 syntax 报错并中断整个检查，且 follow_imports=skip 也绕不过解析阶段。
+# 存根恢复兼容或日后放弃 3.10 静态检查时移除该上限；其他传递依赖若跟进同样语法，照此加行。
+lint = ["mypy==2.3.1", "numpy<2.5", "ruff==0.16.4", "types-requests==2.33.0.20260712"]
 
 [tool.ruff]
 target-version = "py310"
@@ -40,6 +47,18 @@ line-length = 100
 # 不启用 S：本项目 67 条命中里全是测试的 assert（S101）和 fonts.py 的 fc-match 调用（S603），
 # 都是有意为之，加一堆 noqa 只会掩盖真问题。
 select = ["E4", "E7", "E9", "F", "W", "I", "B", "UP"]
+
+[tool.mypy]
+# 全项目函数都有完整注解，静态检查保证注解不随代码腐烂。按最低支持版本 3.10 检查，
+# 避免只在最新 Python 上才暴露的 API 误用混进来。
+files = ["src"]
+python_version = "3.10"
+strict = true
+
+[[tool.mypy.overrides]]
+# 不发布类型存根的两个运行时依赖；jieba.lcut 的 Any 返回值由调用处 list() 包一层兜住。
+module = ["jieba", "wordcloud"]
+ignore_missing_imports = true
 
 [tool.setuptools.packages.find]
 where = ["src"]

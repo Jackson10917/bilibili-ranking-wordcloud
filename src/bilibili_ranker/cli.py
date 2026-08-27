@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Any
 
 from .cleaner import TitleAnalyzer, deduplicate_records
 from .client import MAX_TIMEOUT_SECONDS, fetch_all_ranking
+from .fonts import resolve_font_path
 from .models import parse_ranking_records
 from .stopwords import DEFAULT_LANGUAGES, load_stopword_policy
 from .storage import create_output_bundle, write_records_csv
@@ -42,6 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"逗号分隔的 stopwordsiso 语言代码（默认：{','.join(DEFAULT_LANGUAGES)}）",
     )
     parser.add_argument("--timeout", type=float, default=15.0, help="请求超时秒数")
+    parser.add_argument(
+        "--rid",
+        type=int,
+        default=0,
+        help="排行榜分区 ID；0 为全站榜，其余为上游接口定义的分区 rid",
+    )
     parser.add_argument("--width", type=int, default=1920, help="词云宽度")
     parser.add_argument("--height", type=int, default=1080, help="词云高度")
     parser.add_argument("--max-words", type=int, default=300, help="词云最大词数")
@@ -59,10 +67,17 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     # 而不是抓完整个榜单再抛异常、CSV 一个字节都不落盘。
     policy = load_stopword_policy(args.resource_dir, languages=args.languages)
 
+    # 显式配置的字体（--font-path 或环境变量）同理提前到任何写盘和请求之前：路径写错一个
+    # 字母不该等抓完整榜后被词云阶段的降级逻辑吞成警告、退出码还是 0。两处都没给时仍把
+    # 自动探测留给渲染期——那属于「环境缺中日韩字体」的可降级故障，不是用户输错参数。
+    resolved_font: Path | None = None
+    if args.font_path is not None or os.environ.get("BILIBILI_WORDCLOUD_FONT"):
+        resolved_font = resolve_font_path(args.font_path)
+
     # 同理先探输出目录：CSV 先落盘的设计下，目录不可写会让抓完的整榜数据白抓一遍。
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    fetched = fetch_all_ranking(timeout_seconds=args.timeout)
+    fetched = fetch_all_ranking(timeout_seconds=args.timeout, rid=args.rid)
 
     bundle = create_output_bundle(args.output_dir, fetched.fetched_at)
 
@@ -105,7 +120,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             generated_wordcloud = render_wordcloud(
                 frequencies,
                 bundle.wordcloud_png,
-                font_path=args.font_path,
+                font_path=resolved_font,
                 width=args.width,
                 height=args.height,
                 max_words=args.max_words,
@@ -143,6 +158,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("词云尺寸和最大词数必须大于 0")
     if args.minimum_token_length <= 0:
         parser.error("--minimum-token-length 必须大于 0")
+    if args.rid < 0:
+        parser.error("--rid 必须不小于 0")
 
     try:
         summary = run_pipeline(args)

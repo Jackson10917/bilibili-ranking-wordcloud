@@ -48,3 +48,16 @@ jobs:
       - run: python -m pip install -e ".[lint]"
       - run: ruff check .
       - run: ruff format --diff .
+
+  # 全项目函数都有完整注解但此前没有静态验证；按最低支持版本 3.10 检查（见
+  # pyproject 的 [tool.mypy]），避免只在最新 Python 上才暴露的 API 误用混进主干。
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      # mypy/types-requests 同样钉在 lint extra，本地与 CI 版本一致。
+      - run: python -m pip install -e ".[lint]"
+      - run: python -m mypy
