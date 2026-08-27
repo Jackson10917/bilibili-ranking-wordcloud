@@ -164,18 +164,21 @@ def load_frequency_csvs(paths: Iterable[Path]) -> dict[str, int]:
     """读取 write_frequencies_csv 写出的词频 CSV 并按词求和，结果按词频降序。
 
     读取的是自家产物，只做对称的逆操作：词列剥掉公式前缀转义的单引号；
-    个别坏行跳过而不是炸掉整个聚合。
+    个别坏文件（如历史 CSV 正被 Excel 占用）或坏行跳过，而不是炸掉整个聚合。
     """
 
     merged: Counter[str] = Counter()
     for path in paths:
-        with path.open("r", encoding="utf-8-sig", newline="") as stream:
-            for row in csv.DictReader(stream):
-                word = (row.get("词") or "").removeprefix("'")
-                if not word:
-                    continue
-                try:
-                    merged[word] += int(row.get("词频") or "")
-                except ValueError:
-                    continue
+        try:
+            with path.open("r", encoding="utf-8-sig", newline="") as stream:
+                for row in csv.DictReader(stream):
+                    word = (row.get("词") or "").removeprefix("'")
+                    if not word:
+                        continue
+                    try:
+                        merged[word] += int(row.get("词频") or "")
+                    except ValueError:
+                        continue
+        except OSError:
+            continue
     return dict(merged.most_common())

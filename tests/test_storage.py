@@ -136,3 +136,25 @@ def test_load_frequency_csvs_merges_and_orders() -> None:
 
     assert list(merged) == ["魔方", "模型", "教程", "pv"]
     assert merged == {"魔方": 5, "教程": 1, "pv": 1, "模型": 2}
+
+
+def test_load_frequency_csvs_skips_unreadable_file() -> None:
+    # 坏文件与坏行同权跳过：历史 CSV 正被 Excel 占用时（README 推荐用 Excel 打开产物，
+    # Windows 上是 PermissionError），聚合不能整个炸掉——此时本次榜单与词频 CSV 已落盘，
+    # 抛出去会把一次正常运行误判成退出码 1。
+    from bilibili_ranker.storage import load_frequency_csvs
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        good = root / "word_frequency_20240101T000000Z.csv"
+        good.write_text("词,词频\n魔方,2\n", encoding="utf-8-sig")
+        locked = root / "word_frequency_20240102T000000Z.csv"
+        # 打开目录在 Windows 是 PermissionError、POSIX 是 IsADirectoryError，同为 OSError，
+        # 可移植地模拟「文件存在但读不开」。
+        locked.mkdir()
+        bad_row = root / "word_frequency_20240103T000000Z.csv"
+        bad_row.write_text("词,词频\n魔方,1\n模型,不是数字\n", encoding="utf-8-sig")
+
+        merged = load_frequency_csvs((locked, bad_row, good))
+
+    assert merged == {"魔方": 3}
