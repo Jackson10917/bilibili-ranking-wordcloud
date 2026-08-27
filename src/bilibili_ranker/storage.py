@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import os
 import uuid
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -151,3 +152,30 @@ FREQUENCY_CSV_HEADERS = ("词", "词频")
 def write_frequencies_csv(destination: Path, frequencies: Mapping[str, int | float]) -> Path:
     rows = ({"词": _spreadsheet_safe(word), "词频": count} for word, count in frequencies.items())
     return _atomic_csv_write(destination, FREQUENCY_CSV_HEADERS, rows)
+
+
+# 跨运行聚合产物用固定名、每次原子覆盖：它是滚动累计快照，不是逐日归档；
+# 逐日数据就是目录里那些带时间戳的词频 CSV 本身。
+AGGREGATE_FREQUENCY_CSV_NAME = "word_frequency_aggregate.csv"
+AGGREGATE_WORDCLOUD_PNG_NAME = "wordcloud_aggregate.png"
+
+
+def load_frequency_csvs(paths: Iterable[Path]) -> dict[str, int]:
+    """读取 write_frequencies_csv 写出的词频 CSV 并按词求和，结果按词频降序。
+
+    读取的是自家产物，只做对称的逆操作：词列剥掉公式前缀转义的单引号；
+    个别坏行跳过而不是炸掉整个聚合。
+    """
+
+    merged: Counter[str] = Counter()
+    for path in paths:
+        with path.open("r", encoding="utf-8-sig", newline="") as stream:
+            for row in csv.DictReader(stream):
+                word = (row.get("词") or "").removeprefix("'")
+                if not word:
+                    continue
+                try:
+                    merged[word] += int(row.get("词频") or "")
+                except ValueError:
+                    continue
+    return dict(merged.most_common())

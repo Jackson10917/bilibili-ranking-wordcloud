@@ -330,3 +330,57 @@ def test_explicit_font_errors_surface_before_network() -> None:
                 else:
                     os.environ["BILIBILI_WORDCLOUD_FONT"] = old
 
+
+def test_cli_aggregate_merges_history_and_skips_itself() -> None:
+    # --aggregate 把目录里已有词频 CSV 与本次结果按词求和；聚合产物自身必须排除，
+    # 否则第二次 --aggregate 会把上次的累计值整个再翻一倍。
+    from unittest.mock import patch
+
+    import bilibili_ranker.cli as cli_module
+    from bilibili_ranker.client import RankingFetchResult
+    from bilibili_ranker.storage import AGGREGATE_FREQUENCY_CSV_NAME
+
+    def fetched_on(day: int) -> RankingFetchResult:
+        return RankingFetchResult(
+            fetched_at=datetime(2024, 3, day, tzinfo=timezone.utc),
+            items=({"bvid": "BV1aa0000000", "title": "魔方教程 魔方"},),
+        )
+
+    def fake_render(*_: object, **__: object) -> Path:
+        raise RuntimeError("找不到字体")
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "word_frequency_20240101T000000Z.csv").write_text(
+            "词,词频\n魔方,2\n", encoding="utf-8-sig"
+        )
+        (root / "word_frequency_20240102T000000Z.csv").write_text(
+            "词,词频\n'模型,3\n", encoding="utf-8-sig"
+        )
+
+        with (
+            patch.object(cli_module, "fetch_all_ranking", lambda **_: fetched_on(1)),
+            patch.object(cli_module, "render_wordcloud", fake_render),
+        ):
+            assert main(["--output-dir", directory, "--aggregate"]) == 0
+
+        aggregate = root / AGGREGATE_FREQUENCY_CSV_NAME
+        assert aggregate.exists()
+        with aggregate.open(encoding="utf-8-sig", newline="") as stream:
+            counts = {row["词"]: row["词频"] for row in csv.DictReader(stream)}
+        # 两份历史 + 本次标题（魔方+2、教程+1）。
+        assert counts == {"魔方": "4", "教程": "1", "模型": "3"}
+
+        # 第二次运行：历史里多了第一轮的时间戳词频 CSV，按词继续累加；
+        # 若聚合产物没被排除，魔方会变成 10。
+        with (
+            patch.object(cli_module, "fetch_all_ranking", lambda **_: fetched_on(2)),
+            patch.object(cli_module, "render_wordcloud", fake_render),
+        ):
+            assert main(["--output-dir", directory, "--aggregate"]) == 0
+        with aggregate.open(encoding="utf-8-sig", newline="") as stream:
+            assert {row["词"]: row["词频"] for row in csv.DictReader(stream)} == {
+                "魔方": "6",
+                "教程": "2",
+                "模型": "3",
+            }

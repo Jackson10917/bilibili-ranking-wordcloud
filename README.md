@@ -36,7 +36,14 @@
 │     ├─ allowlist.txt
 │     └─ README.md
 ├─ tests/
-│  ├─ test_core.py
+│  ├─ test_cli.py
+│  ├─ test_cleaner.py
+│  ├─ test_client.py
+│  ├─ test_fonts.py
+│  ├─ test_models.py
+│  ├─ test_storage.py
+│  ├─ test_stopwords.py
+│  ├─ test_wordcloud.py
 │  └─ fixtures/ranking_v2_sample.json
 ├─ assets/
 │  └─ wordcloud-sample.png
@@ -95,6 +102,8 @@ python -m bilibili_ranker --output-dir output
 --font-path PATH               指定 TTF、TTC 或 OTF 字体
 --languages zh,en,ja,ko        指定停用词语言，大小写不敏感（ZH 与 zh 等价）
 --minimum-token-length 2       普通词最短长度
+--aggregate                    合并输出目录已有词频 CSV，额外输出累计词频 CSV
+                               与按累计词频渲染的词云
 --width 1920                   词云图宽度
 --height 1080                  词云图高度
 --max-words 300                词云图最大词数
@@ -119,7 +128,19 @@ output/
 
 CSV 使用 `utf-8-sig` 编码，可直接使用 Excel 打开。标题和 UP 主名称若以 `=`、`+`、`-`、`@`、Tab、CR 开头，会加单引号前缀，避免电子表格把投稿内容当公式求值。再次运行不会删除已有结果；同一秒内多次运行时，新结果会在文件名中追加 `-2`、`-3` 后缀，避免覆盖。文件名通过 `O_CREAT|O_EXCL` 原子占位，多进程并行且落在同一秒时同样不会互相覆盖。若标题清洗后没有可用词元，或词云生成失败（如缺少字体），则不产出词云图，并在失败时给出警告；有词元时词频 CSV 照常写出。
 
-词频 CSV 同为 `utf-8-sig` 编码，两列（`词`、`词频`），按词频降序排列，可直接用于趋势对比、导入 BI 等二次分析；词元同样做公式前缀转义。词云生成失败时词频 CSV 照常写出，只有标题清洗后没有可用词元时不产出该文件。
+词频 CSV 同为 `utf-8-sig` 编码，两列（`词`、`词频`），按词频降序排列，可导入 BI 等二次分析；词元同样做公式前缀转义。词云生成失败时词频 CSV 照常写出，只有标题清洗后没有可用词元时不产出该文件。注意单次榜单的词频里九成以上的词只出现一两次，单次快照撑不起趋势对比——跨天累计请使用 `--aggregate`。
+
+### 跨运行聚合（--aggregate）
+
+单次榜单约 100 条标题，词频分布接近噪声（最高频词也只出现 4 次左右），词云字号编码不出有效信息；把每天的时间戳词频 CSV 攒起来、按词求和之后，分布才开始收敛。加 `--aggregate` 运行时，本次会在正常输出之外把输出目录里全部 `word_frequency_*.csv`（含本次刚写出的）按词求和，额外产出两个固定名文件并原子覆盖——是滚动累计快照，不是逐日归档，逐日数据就是目录里的时间戳词频 CSV 本身：
+
+```
+output/
+├─ word_frequency_aggregate.csv   # 累计词频，按词频降序
+└─ wordcloud_aggregate.png        # 按累计词频渲染的词云；字体缺失时同样降级为仅 CSV + 警告
+```
+
+聚合产物自身会从合并范围中排除，连续运行不会重复累计。聚合以输出目录为单位：不同分区（`--rid`）请使用不同的 `--output-dir`，同一个目录混用多个 rid 会把分区混在一起累计。
 
 若接口返回成功但整榜记录全部无法解析（例如上游字段变更），退出码为 1，同时仍写出只含表头的 CSV 便于排查——自动化任务不会把这种情况误判为成功。
 

@@ -121,3 +121,18 @@ def test_storage_accepts_naive_datetime() -> None:
         bundle = create_output_bundle(Path(directory), datetime(2024, 1, 1))
         assert bundle.ranking_csv.name == "ranking_20240101T000000Z.csv"
 
+
+def test_load_frequency_csvs_merges_and_orders() -> None:
+    # 聚合读取的是 write_frequencies_csv 的产物：按词求和、转义逆操作、行序降序、坏行跳过。
+    from bilibili_ranker.storage import load_frequency_csvs, write_frequencies_csv
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        write_frequencies_csv(root / "a.csv", {"魔方": 2, "教程": 1})
+        write_frequencies_csv(root / "b.csv", {"魔方": 3, "pv": 1})
+        (root / "c.csv").write_text("词,词频\n'模型,2\n垃圾行\n", encoding="utf-8")
+
+        merged = load_frequency_csvs([root / "a.csv", root / "b.csv", root / "c.csv"])
+
+    assert list(merged) == ["魔方", "模型", "教程", "pv"]
+    assert merged == {"魔方": 5, "教程": 1, "pv": 1, "模型": 2}
