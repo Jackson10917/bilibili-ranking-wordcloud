@@ -35,7 +35,6 @@
 │  └─ test_core.py
 ├─ .gitignore
 ├─ LICENSE
-├─ PONYTAIL-DEBT.md
 ├─ pyproject.toml
 └─ README.md
 ```
@@ -162,7 +161,7 @@ Emoji、标点及其他符号不参与词频统计。标题中只有 Emoji 或�
 3. 系统中的 Noto Sans CJK、思源黑体、微软雅黑、黑体、苹方或文泉驿字体；
 4. Linux `fontconfig` 返回的字体。
 
-Linux 推荐安装 Noto Sans CJK。仓库不包含专有字体文件。显式指定的字体（`--font-path` 或 `BILIBILI_WORDCLOUD_FONT`）会校验后缀与 sfnt 容器魔数，内容损坏时直接报错，不会拖到渲染阶段；自动查找只确认候选字体文件存在，不检查完整字形覆盖，若词云出现缺字，请使用 `--font-path` 指定包含所需字符的字体。
+Linux 推荐安装 Noto Sans CJK。仓库不包含专有字体文件。显式指定的字体（`--font-path` 或 `BILIBILI_WORDCLOUD_FONT`）会校验后缀与 sfnt 容器魔数，并用 PIL 试载做深度校验，内容损坏时直接报错，不会拖到渲染阶段；自动查找只确认候选字体文件存在，不检查完整字形覆盖，若词云出现缺字，请使用 `--font-path` 指定包含所需字符的字体。
 
 `.ttc` 是字体集合容器，内部按语言分多个 face。`wordcloud` 调用 PIL 时不传 `index`，恒取 face 0——`NotoSansCJK-Regular.ttc` 的 face 0 是日文，简体汉字会以日文字形变体渲染（如「直」「骨」的写法差异），不是缺字。候选列表已把单体 `NotoSansCJKsc-Regular.otf` 排在 `.ttc` 之前；Debian 系的 `fonts-noto-cjk` 只提供 `.ttc`，若在意字形，用 `--font-path` 指定单体 SC 字体（`NotoSansSC-Regular.otf` 等）。
 

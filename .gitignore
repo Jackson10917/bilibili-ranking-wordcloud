@@ -12,3 +12,5 @@ output/
 .DS_Store
 Thumbs.db
 .coverage
+# ponytail 债务台账只保留在本地，不入库。
+PONYTAIL-DEBT.md
