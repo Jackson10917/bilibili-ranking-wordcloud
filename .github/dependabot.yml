@@ -1,0 +1,12 @@
+# 自动跟进 actions 与依赖的版本更新；上一次 actions 的 Node 20 弃用是靠人看日志
+# 才发现的，交给机器人按月提醒。
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly

@@ -35,7 +35,9 @@ def _read_word_file(path: Path | Traversable) -> set[str]:
 
 
 def default_resource_dir() -> Traversable:
-    return files("bilibili_ranker").joinpath("resources", "stopwords")
+    # 链式单参 joinpath：Traversable 协议（3.10 的 ABC）只定义单参签名，多参形式
+    # 在普通安装下因底层是 pathlib.Path 才碰巧可用，zip 导入等场景会炸。
+    return files("bilibili_ranker").joinpath("resources").joinpath("stopwords")
 
 
 @dataclass(frozen=True, slots=True)

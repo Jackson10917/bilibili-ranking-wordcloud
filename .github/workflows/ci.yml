@@ -15,6 +15,10 @@ concurrency:
 
 # 第三方 action 的 tag 可以被移动重指到别的 commit；钉死发布版的 commit SHA（注释为版本号），
 # 升级时手动换行。
+# 只拉代码跑测试，不需要任何写权限；显式收窄避免默认 token 权限过大。
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:

@@ -134,7 +134,9 @@ def fetch_all_ranking(
             try:
                 response = session.get(
                     RANKING_API_URL,
-                    params={"rid": 0, "type": "all"},
+                    # wire 上本就是字符串，requests 也只是把 int str() 一遍；写死字符串
+                    # 兼顾类型签名与 URL 稳定。
+                    params={"rid": "0", "type": "all"},
                     headers={
                         "Accept": "application/json, text/plain, */*",
                         "Referer": RANKING_PAGE_URL,
