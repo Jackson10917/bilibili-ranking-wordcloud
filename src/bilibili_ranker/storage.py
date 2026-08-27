@@ -179,6 +179,8 @@ def load_frequency_csvs(paths: Iterable[Path]) -> dict[str, int]:
                         merged[word] += int(row.get("词频") or "")
                     except ValueError:
                         continue
-        except OSError:
+        # UnicodeDecodeError（历史 CSV 被 Excel 另存成 ANSI 编码）和 csv.Error
+        # （超长字段）都不是 OSError 子类，漏掉任何一个都会炸掉整个聚合。
+        except (OSError, UnicodeDecodeError, csv.Error):
             continue
     return dict(merged.most_common())

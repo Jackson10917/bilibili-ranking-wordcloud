@@ -158,3 +158,23 @@ def test_load_frequency_csvs_skips_unreadable_file() -> None:
         merged = load_frequency_csvs((locked, bad_row, good))
 
     assert merged == {"魔方": 3}
+
+
+def test_load_frequency_csvs_skips_bad_encoding_and_oversized_field() -> None:
+    # Excel「另存为」默认 ANSI/GBK，重读抛 UnicodeDecodeError——它是 ValueError 的子类
+    # 而非 OSError；超过 csv 模块默认字段上限（131072 字符）的行抛 csv.Error。
+    # 两类都按坏文件跳过，旁边的正常文件照常计入。
+    from bilibili_ranker.storage import load_frequency_csvs
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        good = root / "word_frequency_20240101T000000Z.csv"
+        good.write_text("词,词频\n魔方,2\n", encoding="utf-8-sig")
+        gbk = root / "word_frequency_20240102T000000Z.csv"
+        gbk.write_bytes("词,词频\n测试,5\n".encode("gbk"))
+        oversized = root / "word_frequency_20240103T000000Z.csv"
+        oversized.write_text("词,词频\n" + "长" * 140000 + ",1\n", encoding="utf-8")
+
+        merged = load_frequency_csvs((gbk, oversized, good))
+
+    assert merged == {"魔方": 2}
