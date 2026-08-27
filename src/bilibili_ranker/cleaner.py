@@ -161,13 +161,18 @@ class TitleAnalyzer:
                 tokens.extend(pieces)
                 # jieba 只有中文词典，日文汉字词（実況、洗濯）会被全切成单字后被
                 # minimum_token_length 丢干净。全单字说明词典没命中，整块也留一份。
-                # 但中文虚词串（「他也是」「和你的」）同样会被切成全单字，整块会绕过
-                # 停用词过滤混进词云。全部单字都是停用词才判定为虚词串丢弃：
-                # 日语汉字词里就算有个别汉字撞上中文停用词（自転車 的「自」、本気 的
-                # 「本」），也不会整块都撞上。
+                # 但 --minimum-token-length 1 时单字本来就能存活，整块再留一份会让
+                # 同一处文本计两次（実/況/実況 各一份），此时不回退。
+                # 中文虚词串（「他也是」「和你的」）整块会绕过停用词过滤混进词云，
+                # 全部单字都是停用词才判定为虚词串丢弃：日语汉字词里就算有个别汉字
+                # 撞上中文停用词（自転車 的「自」、本気 的「本」），也不会整块都撞上。
                 # 已知上限：这个启发式判不出全部中日虚词边界；精确切日语需要
                 # mecab/UniDic 这类重依赖，按「不为边角引入重依赖」的取舍不做。
-                if len(chunk) > 1 and all(len(piece) == 1 for piece in pieces):
+                if (
+                    self._minimum_token_length > 1
+                    and len(chunk) > 1
+                    and all(len(piece) == 1 for piece in pieces)
+                ):
                     if not all(
                         normalize_token(piece) in self._policy.stopwords for piece in pieces
                     ):

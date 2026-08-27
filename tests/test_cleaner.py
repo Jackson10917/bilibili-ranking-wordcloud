@@ -336,3 +336,14 @@ def test_unassigned_cjk_codepoint_dropped() -> None:
     )
     assert analyzer.analyze([record]) == {"教程": 1}
 
+
+def test_minimum_token_length_one_does_not_double_count() -> None:
+    # --minimum-token-length 1 时单字本就存活，全单字回退不再整块重复保留：
+    # 否则同一处文本计两次（実/況/実況 各一份）。
+    analyzer = TitleAnalyzer(load_stopword_policy(), minimum_token_length=1)
+    record = VideoRankingRecord.from_api_item(
+        {"bvid": "BV1aa0000000", "title": "ゲーム実況"}, rank=1
+    )
+    frequencies = analyzer.analyze([record])
+    assert "実況" not in frequencies
+    assert frequencies == {"実": 1, "況": 1, "ゲーム": 1}
