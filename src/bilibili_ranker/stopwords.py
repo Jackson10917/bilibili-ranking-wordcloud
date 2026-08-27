@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from importlib.resources import files
 
 try:  # importlib.abc.Traversable 3.12 起弃用、3.14 移除，优先用新位置
-    from importlib.resources.abc import Traversable
+    # 该模块 3.11 才存在，mypy 按 python_version=3.10 找不到它；运行时有 ImportError 兜底。
+    from importlib.resources.abc import Traversable  # type: ignore[import-not-found]
 except ImportError:  # Python 3.10
     from importlib.abc import Traversable
 from collections.abc import Iterable

@@ -20,11 +20,12 @@ def _jieba_lcut(text: str) -> list[str]:
     # jieba 首次分词会往 stderr 打 "Building prefix dict ..."，对 CLI 输出是纯噪音。
     # setLogLevel 在导入后立即调用，只在第一次真正使用时执行，避免全局副作用。
     _jieba.setLogLevel("ERROR")
-    return _jieba.lcut(text, cut_all=False)
+    # list() 同时消掉无存根依赖的 Any 返回值，满足 --strict 的 no-any-return。
+    return list(_jieba.lcut(text, cut_all=False))
 
 
-# U+3005 \u3005 \u662f\u53e0\u5b57\u7b26\uff08\u4eba\u3005\u3001\u6642\u3005\u3001\u69d8\u3005\uff09\uff0cU+3007 \u3007 \u662f\u8868\u610f\u6570\u5b57\u96f6\uff0c\u4e24\u8005 Unicode \u90fd\u5f52 CJK
-# Symbols \u5757\uff0c\u4e0d\u5728\u7edf\u4e00\u8868\u610f\u6587\u5b57\u533a\u95f4\u91cc\uff0c\u6f0f\u6389\u4f1a\u628a\u300c\u4eba\u3005\u300d\u6574\u8bcd\u5207\u788e\u540e\u4e22\u5e72\u51c0\u3002
+# U+3005 々 是叠字符（人々、時々、様々），U+3007 〇 是表意数字零，两者 Unicode 都归 CJK
+# Symbols 块，不在统一表意文字区间里，漏掉会把「人々」整词切碎后丢干净。
 _CJK_RANGE = r"\u3005\u3007\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U000323af"
 
 # 拉丁字母词元包含重音字符（café、déjà），否则会被拆成单字母碎片。

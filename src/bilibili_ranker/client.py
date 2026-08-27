@@ -107,8 +107,9 @@ def fetch_all_ranking(
     *,
     timeout_seconds: float = 15.0,
     user_agent: str | None = None,
+    rid: int = 0,
 ) -> RankingFetchResult:
-    """请求当前全站榜，接口和参数保持为 `rid=0&type=all`。
+    """请求排行榜；默认全站榜（rid=0&type=all），其余 rid 由上游接口按分区榜解释。
 
     被风控拦截（业务码 -352，或只有 HTTP 412 没有 JSON 体）时刷新 buvid cookie 后重试。
     """
@@ -119,6 +120,9 @@ def fetch_all_ranking(
         raise BilibiliAPIError(
             f"timeout_seconds 必须是 0 到 {MAX_TIMEOUT_SECONDS:.0f} 之间的有限数：{timeout_seconds!r}"
         )
+    # rid 与 timeout 同理在入口挡掉非法值；bool 是 int 的子类，True 会被 str() 成 "True"。
+    if isinstance(rid, bool) or not isinstance(rid, int) or rid < 0:
+        raise BilibiliAPIError(f"rid 必须是不小于 0 的整数：{rid!r}")
 
     user_agent = user_agent or _default_user_agent()
     fetched_at = datetime.now(timezone.utc)
@@ -134,9 +138,9 @@ def fetch_all_ranking(
             try:
                 response = session.get(
                     RANKING_API_URL,
-                    # wire 上本就是字符串，requests 也只是把 int str() 一遍；写死字符串
-                    # 兼顾类型签名与 URL 稳定。
-                    params={"rid": "0", "type": "all"},
+                    # wire 上本就是字符串，requests 也只是把 int str() 一遍；int 写成
+                    # 字符串兼顾类型签名与 URL 稳定。
+                    params={"rid": str(rid), "type": "all"},
                     headers={
                         "Accept": "application/json, text/plain, */*",
                         "Referer": RANKING_PAGE_URL,
