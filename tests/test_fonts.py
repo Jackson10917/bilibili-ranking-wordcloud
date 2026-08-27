@@ -167,3 +167,81 @@ def test_font_not_found_when_system_has_none() -> None:
                 assert "--font-path" in str(exc)
             else:
                 raise AssertionError("无字体环境未抛出 FontNotFoundError")
+
+
+def test_font_discovered_via_recursive_scan() -> None:
+    # 直链候选不存在时靠 rglob 递归探测嵌套子目录（Debian 的 fonts-noto-cjk 就装在
+    # opentype/noto 这类子目录里）。两条排序规则都要成立：同名字体取路径排序最小的
+    # （保证跨机器可复现）；候选名单顺序压过文件系统扫描顺序。
+    import os
+    from unittest.mock import patch
+
+    from bilibili_ranker import fonts as fonts_module
+
+    old = os.environ.get("BILIBILI_WORDCLOUD_FONT")
+    try:
+        os.environ.pop("BILIBILI_WORDCLOUD_FONT", None)
+
+        # 同名候选出现在两个深度，按路径排序应取 b/ 下那份而非 c/deep/ 下那份。
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            same_named = root / "b" / "NotoSansSC-Regular.otf"
+            same_named.parent.mkdir()
+            same_named.write_bytes(b"\x00\x01\x00\x00")
+            (root / "c" / "deep").mkdir(parents=True)
+            (root / "c" / "deep" / "NotoSansSC-Regular.otf").write_bytes(b"\x00\x01\x00\x00")
+
+            with (
+                patch.object(fonts_module, "_standard_font_roots", lambda: iter((root,))),
+                patch.object(fonts_module.shutil, "which", lambda _: None),
+            ):
+                assert fonts_module.resolve_font_path(None) == same_named.resolve()
+
+        # STHeiti 在目录 a/ 下会先被扫到，但名单里 simsun 排在它前面，应返回 simsun：
+        # 候选名单顺序必须压过文件系统扫描顺序。
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "a").mkdir()
+            (root / "a" / "STHeiti Medium.ttc").write_bytes(b"ttcf")
+            expected = root / "z" / "simsun.ttc"
+            expected.parent.mkdir()
+            expected.write_bytes(b"\x00\x01\x00\x00")
+
+            with (
+                patch.object(fonts_module, "_standard_font_roots", lambda: iter((root,))),
+                patch.object(fonts_module.shutil, "which", lambda _: None),
+            ):
+                assert fonts_module.resolve_font_path(None) == expected.resolve()
+    finally:
+        if old is not None:
+            os.environ["BILIBILI_WORDCLOUD_FONT"] = old
+
+
+def test_fontconfig_skips_unusable_results() -> None:
+    # fc-match 子进程崩溃/超时、返回的字体文件不存在时必须跳过该 family继续找，
+    # 不能让 OSError 逸出成崩溃，也不能把不存在的路径交出去。
+    import subprocess
+    from unittest.mock import patch
+
+    from bilibili_ranker import fonts as fonts_module
+
+    def raise_os_error(*_: object, **__: object) -> object:
+        raise OSError("fc-match 不可执行")
+
+    def raise_timeout(*_: object, **__: object) -> object:
+        raise subprocess.TimeoutExpired(cmd="fc-match", timeout=3)
+
+    with patch.object(fonts_module.shutil, "which", lambda _: "fc-match"):
+        with patch.object(fonts_module.subprocess, "run", raise_os_error):
+            assert fonts_module._fontconfig_match() is None
+        with patch.object(fonts_module.subprocess, "run", raise_timeout):
+            assert fonts_module._fontconfig_match() is None
+
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing.ttc"
+
+            def nonexistent_file(argv: tuple[str, ...], **_: object) -> subprocess.CompletedProcess:
+                return subprocess.CompletedProcess(argv, 0, f"{missing}\n{argv[-1]}\n", "")
+
+            with patch.object(fonts_module.subprocess, "run", nonexistent_file):
+                assert fonts_module._fontconfig_match() is None
