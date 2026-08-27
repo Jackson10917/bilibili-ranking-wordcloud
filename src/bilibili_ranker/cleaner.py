@@ -49,6 +49,12 @@ _CHUNK_PATTERN = re.compile(
 _CJK_PATTERN = re.compile(rf"[{_CJK_RANGE}]+")
 _NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?")
 
+# 两个以上 bvid 无分隔直接堆叠（如「BV1aa0000000BV1bb1111111」）时剥噪声管不到：
+# 每个 BV 号的右边界都被下一个 B 挡住。但这类串进入词元的形状是唯一的——整体是
+# 「bv+10 位字母数字」的重复（长度必为 12 的倍数），自然语言的词没有这种形状，
+# 整体丢弃不会误伤正常内容；写进 CSV 前的实际 BV 号另有 fullmatch 校验，不受影响。
+_BVID_STACK_PATTERN = re.compile(r"(?:bv[0-9a-z]{10})+", re.IGNORECASE)
+
 
 # 链接和 BV 号是标识符，不是词：https、b23.tv、www.bilibili.com、video、bv1xx411c7md 都会
 # 混进词云，而停用词表只能收精确词，覆盖不了域名和随机 BV 号变体。分词前整段剥掉。
@@ -155,6 +161,8 @@ class TitleAnalyzer:
         if token in self._policy.allowlist:
             return token
         if _NUMBER_PATTERN.fullmatch(token):
+            return None
+        if _BVID_STACK_PATTERN.fullmatch(token):
             return None
         # 日文、西里尔按整块匹配，块内混着符号（・U+30FB、҂U+0482）。
         # 逐块手挖区间会漏，直接要求词元至少含一个字母。

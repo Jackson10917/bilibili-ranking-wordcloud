@@ -584,6 +584,27 @@ def test_bvid_noise_stripped_adjacent_to_cjk() -> None:
     assert normalize_title("BV1aa0000000www.bilibili.com") == ""
 
 
+def test_glued_bvid_stack_dropped() -> None:
+    # 两个以上 bvid 无分隔堆叠时噪声剥离管不到（每个 BV 的右边界都被下一个 B 挡住），
+    # 会整体残留成垃圾词元。归一化后形状是「bv+10 位字母数字」的重复、长度必为 12
+    # 的倍数，自然语言的词没有这种形状，token 层整体丢弃。
+    analyzer = TitleAnalyzer(load_stopword_policy())
+    record = VideoRankingRecord.from_api_item(
+        {"bvid": "BV1aa0000000", "title": "BV1aa0000000BV1bb1111111"}, rank=1
+    )
+    assert analyzer.analyze([record]) == {}
+    # 三连堆叠同样命中。
+    record = VideoRankingRecord.from_api_item(
+        {"bvid": "BV1aa0000000", "title": "BV1aa0000000BV1bb1111111BV1cc2222222"}, rank=1
+    )
+    assert analyzer.analyze([record]) == {}
+    # 常规分隔的 BV 号仍由噪声剥离处理，词形不受 token 层判定影响。
+    record = VideoRankingRecord.from_api_item(
+        {"bvid": "BV1aa0000000", "title": "xbv1aa0000000def"}, rank=1
+    )
+    assert analyzer.analyze([record]) == {"xbv1aa0000000def": 1}
+
+
 def test_japanese_iteration_mark_kept() -> None:
     # 々(U+3005) 归 CJK Symbols 块，不在统一表意文字区间：漏掉会把「人々」整词丢干净。
     policy = load_stopword_policy()
