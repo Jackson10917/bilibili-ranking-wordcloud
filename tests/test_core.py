@@ -1218,6 +1218,38 @@ def test_missing_resource_dir_exits_one() -> None:
             assert main(["--resource-dir", empty_dir]) == 1
 
 
+def test_resource_dir_override_loads_custom_words() -> None:
+    # README 承诺 --resource-dir 覆盖内置停用词目录，正向路径此前零覆盖：
+    # str 与 Path 两种入参都要能加载，自定义词整体替换目录而非追加。
+    import shutil
+
+    from bilibili_ranker.stopwords import load_stopword_policy
+
+    source = (
+        Path(__file__).resolve().parents[1] / "src" / "bilibili_ranker" / "resources" / "stopwords"
+    )
+    with tempfile.TemporaryDirectory() as d:
+        directory = Path(d)
+        for name in ("custom_stopwords.txt", "allowlist.txt"):
+            shutil.copy(source / name, directory / name)
+
+        # str 入参（覆盖 isinstance 的 str 分支）加载内置内容。
+        policy = load_stopword_policy(str(directory))
+        assert "视频" in policy.stopwords
+        assert "ai" in policy.allowlist
+        assert "ai" not in policy.stopwords
+
+        # 覆盖版 custom_stopwords.txt 整体替换默认词表，allowlist 照常生效。
+        (directory / "custom_stopwords.txt").write_text(
+            "# 覆盖版\n魔方教程\n", encoding="utf-8-sig"
+        )
+        policy = load_stopword_policy(directory)
+        assert "魔方教程" in policy.stopwords
+        assert "视频" not in policy.stopwords
+        assert "ai" in policy.allowlist
+        assert "ai" not in policy.stopwords
+
+
 def test_keyboard_interrupt_exits_130() -> None:
     # Ctrl+C 必须走退出码 130（README 已承诺），不能以 KeyboardInterrupt traceback 收场。
     from unittest.mock import patch
