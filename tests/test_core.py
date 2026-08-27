@@ -63,6 +63,77 @@ def test_deduplicate_records() -> None:
     assert [r.bvid for r in accepted] == ["BV1aa0000000", "BV1Aa0000000", "BV1bb0000000"]
 
 
+def test_from_api_item_maps_every_field() -> None:
+    # 变异测试发现 16 个字段里 9 个的 API 字段名映射零断言：上游改名时测试照旧
+    # 全绿而 CSV 整列变空。逐字段锁死映射、video_url 拼装与发布时间转换。
+    item = {
+        "bvid": "BV1aa0000000",
+        "title": "标题",
+        "tname": "知识",
+        "tnamev2": "科学",
+        "pid_name_v2": "科普",
+        "owner": {"name": "UP主"},
+        "pubdate": 1704067200,
+        "duration": 245,
+        "stat": {
+            "view": 100,
+            "danmaku": 200,
+            "reply": 300,
+            "favorite": 400,
+            "coin": 500,
+            "share": 600,
+            "like": 700,
+        },
+    }
+    record = VideoRankingRecord.from_api_item(item, rank=1)
+    assert record.category_name == "知识"
+    assert record.category_v2_name == "科学"
+    assert record.parent_category_v2_name == "科普"
+    assert record.uploader_name == "UP主"
+    assert record.video_url == "https://www.bilibili.com/video/BV1aa0000000"
+    assert record.published_at == "2024-01-01 08:00:00"
+    assert record.duration_seconds == 245
+    assert record.view_count == 100
+    assert record.danmaku_count == 200
+    assert record.reply_count == 300
+    assert record.favorite_count == 400
+    assert record.coin_count == 500
+    assert record.share_count == 600
+    assert record.like_count == 700
+    # frozen 契约：记录创建后不可变，防止下游误改榜单数据。
+    import pytest
+
+    with pytest.raises(AttributeError):
+        record.rank = 99
+
+
+def test_zero_stats_are_preserved() -> None:
+    # _optional_int 的 >= 0 边界：0 是合法统计值（新视频零播放），不能当缺失丢掉。
+    item = {
+        "bvid": "BV1aa0000000",
+        "title": "t",
+        "owner": {},
+        "pubdate": 1704067200,
+        "stat": {"view": 0, "danmaku": 0, "coin": 0},
+    }
+    record = VideoRankingRecord.from_api_item(item, rank=1)
+    assert record.view_count == 0
+    assert record.danmaku_count == 0
+    assert record.coin_count == 0
+    assert record.duration_seconds is None  # duration 缺失仍必须是缺失
+
+
+def test_parse_ranking_records_ranks_are_one_based() -> None:
+    # enumerate 从 1 起：排名列直接写进 CSV，0 基/2 基都要被拦下。
+    records, _ = parse_ranking_records(
+        [
+            {"bvid": "BV1aa0000000", "title": "a"},
+            {"bvid": "BV1bb0000000", "title": "b"},
+        ]
+    )
+    assert [r.rank for r in records] == [1, 2]
+
+
 def test_parse_ranking_records_tolerance() -> None:
     items = [
         {"bvid": "BV1aa0000000", "title": "t1", "owner": {}, "stat": {}},
@@ -616,8 +687,40 @@ def test_foreign_domain_links_stripped() -> None:
     assert normalize_title("搬运自 youtu.be/abc 说明") == "搬运自 说明"
     # IGNORECASE 对组合出的名单同样生效。
     assert normalize_title("原曲来自 WWW.NICOVIDEO.JP/sm9 注") == "原曲来自 注"
+    # 名单是用户可见契约，必须字面独立断言——数据驱动循环遍历的正是被变异的
+    # 元组，条目被改时循环会跟着改测，永远杀不掉名单类变异（mutmut 实证）。
+    assert normalize_title("看 bilibili.com/video 收藏") == "看 收藏"
+    assert normalize_title("跳 b23.tv 领奖") == "跳 领奖"
+    assert normalize_title("油管 youtube.com/x 同步") == "油管 同步"
+    assert normalize_title("抖音 douyin.com/@name 同款") == "抖音 同款"
+    assert normalize_title("小红书 xiaohongshu.com/explore 笔记") == "小红书 笔记"
+    assert normalize_title("知乎 zhihu.com/question 答主") == "知乎 答主"
+    assert normalize_title("网盘链接 pan.baidu.com/s/1 密码") == "网盘链接 密码"
+    assert normalize_title("弹幕站 acfun.cn/v 投喂") == "弹幕站 投喂"
+    assert normalize_title("源码 github.com/x/y 提交") == "源码 提交"
     # 名单外长尾域名维持不误伤；出现噪声时往 _NOISY_DOMAINS 加一行即可。
     assert normalize_title("小众站 example.org/about 看看") == "小众站 example.org/about 看看"
+
+
+def test_noisy_domain_list_is_fully_exercised() -> None:
+    # 数据驱动：名单里每一条域名都必须真实生效——变异测试显示新增条目容易
+    # 出现「加了名单没加测试」的死条目，这里随名单增长自动全覆盖。
+    import bilibili_ranker.cleaner as cleaner_module
+    from bilibili_ranker.cleaner import normalize_title
+
+    for domain in cleaner_module._NOISY_DOMAINS:
+        title = f"传送 {domain}/abc 说明"
+        assert normalize_title(title) == "传送 说明", domain
+        # 无路径裸域名同样剥除。
+        assert normalize_title(f"跳 {domain} 即可") == "跳 即可", domain
+
+
+def test_jieba_uses_accurate_mode() -> None:
+    # cut_all=True 的全模式会给词频混入大量冗余切分（研究生命起源 → 研究生/研究/…），
+    # 精确模式的切分结果是词频统计的契约，必须锁死。
+    from bilibili_ranker.cleaner import _jieba_lcut
+
+    assert _jieba_lcut("研究生命起源") == ["研究", "生命", "起源"]
 
 
 def test_link_stripping_keeps_adjacent_cjk() -> None:
@@ -735,6 +838,7 @@ def test_wordcloud_renders_real_png() -> None:
     # 走真实 WordCloud + PIL 保存路径：临时文件扩展名是 .tmp，PIL 推不出格式，
     # 必须显式 format="PNG"，否则整个词云功能 100% 失效。
     import pytest
+    from PIL import Image
 
     from bilibili_ranker.fonts import resolve_font_path
     from bilibili_ranker.wordcloud import render_wordcloud
@@ -753,6 +857,35 @@ def test_wordcloud_renders_real_png() -> None:
         assert destination.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
         leftovers = [p.name for p in Path(directory).iterdir() if p.name.endswith(".tmp")]
         assert leftovers == []
+
+        # 默认尺寸契约（README：默认 1920×1080）与嵌套输出目录自动创建
+        # （两层深：parents=False 的 mkdir 撑不住）。
+        default_sized = render_wordcloud(
+            {"魔方": 5, "教程": 3}, Path(directory) / "deep" / "nested" / "out.png"
+        )
+        with Image.open(default_sized) as image:
+            assert image.size == (1920, 1080)
+
+
+def test_wordcloud_render_is_reproducible() -> None:
+    # 模块承诺「可复现词云」：random_state 固定后，同输入两次渲染必须逐字节一致。
+    import pytest
+
+    from bilibili_ranker.fonts import resolve_font_path
+    from bilibili_ranker.wordcloud import render_wordcloud
+
+    try:
+        resolve_font_path(None)
+    except RuntimeError:
+        pytest.skip("环境无 CJK 字体")
+
+    with tempfile.TemporaryDirectory() as directory:
+        frequencies = {"魔方": 5, "教程": 3, "入门": 2, "直播": 1}
+        # 预热渲染：进程内首次渲染可能带一次性初始化状态，先排掉再比对。
+        render_wordcloud(frequencies, Path(directory) / "warmup.png", width=100, height=50)
+        first = render_wordcloud(frequencies, Path(directory) / "a.png", width=300, height=150)
+        second = render_wordcloud(frequencies, Path(directory) / "b.png", width=300, height=150)
+        assert first.read_bytes() == second.read_bytes()
 
 
 def test_japanese_kanji_word_survives_jieba() -> None:
@@ -1415,7 +1548,7 @@ def test_lazy_imports_report_friendly_errors() -> None:
         try:
             _jieba_lcut("测试")
         except RuntimeError as exc:
-            assert "jieba" in str(exc)
+            assert str(exc) == "缺少 jieba，请先安装项目依赖"
         else:
             raise AssertionError("缺 jieba 未报友好错误")
 
@@ -1423,7 +1556,7 @@ def test_lazy_imports_report_friendly_errors() -> None:
         try:
             load_stopword_policy()
         except RuntimeError as exc:
-            assert "stopwordsiso" in str(exc)
+            assert str(exc) == "缺少 stopwordsiso，请先安装项目依赖"
         else:
             raise AssertionError("缺 stopwordsiso 未报友好错误")
 
@@ -1431,7 +1564,7 @@ def test_lazy_imports_report_friendly_errors() -> None:
         try:
             render_wordcloud({"词": 1}, "unused.png")
         except RuntimeError as exc:
-            assert "wordcloud" in str(exc)
+            assert str(exc) == "缺少 wordcloud，请先安装项目依赖"
         else:
             raise AssertionError("缺 wordcloud 未报友好错误")
 
@@ -1454,7 +1587,8 @@ def test_font_not_found_when_system_has_none() -> None:
 
 
 def test_render_wordcloud_direct_guards() -> None:
-    # 绕过 CLI 直接调 render_wordcloud 时，空词频与非法尺寸都要在导入前被拦下。
+    # 绕过 CLI 直接调 render_wordcloud 时，空词频与非法尺寸都要在导入前被拦下；
+    # 断言自家错误消息：变异若跳过校验，会坠入 wordcloud 库的同型异常而被掩护。
     from bilibili_ranker.wordcloud import render_wordcloud
 
     for kwargs in (
@@ -1464,8 +1598,8 @@ def test_render_wordcloud_direct_guards() -> None:
     ):
         try:
             render_wordcloud(**kwargs)
-        except ValueError:
-            pass
+        except ValueError as exc:
+            assert str(exc) in ("词云尺寸和最大词数必须大于 0", "词频为空，无法生成词云"), exc
         else:
             raise AssertionError(f"非法参数未被拒绝：{kwargs}")
 
@@ -1477,6 +1611,47 @@ def test_storage_accepts_naive_datetime() -> None:
     with tempfile.TemporaryDirectory() as directory:
         bundle = create_output_bundle(Path(directory), datetime(2024, 1, 1))
         assert bundle.ranking_csv.name == "ranking_20240101T000000Z.csv"
+
+
+def test_unicode_input_properties() -> None:
+    # 属性测试：任意 Unicode 标题（含零宽字符、组合记号、未分配码点）下，
+    # 归一化必须幂等、分词与统计不得抛异常；候选层只保证词元非空——未分配
+    # 码点（如 U+FADA，CJK 兼容区尾部 Cn 类）会合法出现在候选里；
+    # isprintable 断言在过滤后的 analyze 输出上，那才是用户可见面。
+    import hypothesis.strategies as st
+    from hypothesis import assume, given, settings
+
+    from bilibili_ranker.cleaner import normalize_title
+
+    analyzer = TitleAnalyzer(load_stopword_policy())
+
+    @given(st.text(max_size=60))
+    @settings(deadline=None, max_examples=50, database=None)
+    def run(title: str) -> None:
+        assume(bool(title.strip()))
+
+        once = normalize_title(title)
+        assert normalize_title(once) == once
+
+        for token in analyzer._candidate_tokens(title):
+            assert token, repr(token)
+
+        record = VideoRankingRecord.from_api_item({"bvid": "BV1aa0000000", "title": title}, rank=1)
+        for word, count in analyzer.analyze([record]).items():
+            assert word and word.isprintable(), repr(word)
+            assert isinstance(count, int) and count > 0
+
+    run()
+
+
+def test_unassigned_cjk_codepoint_dropped() -> None:
+    # hypothesis 反例固化：U+FADA 是 CJK 兼容区尾部的未分配码点（Cn 类），
+    # _CJK_RANGE 整段收录使其进入候选层，但字母检查必须把它挡在词频之外。
+    analyzer = TitleAnalyzer(load_stopword_policy())
+    record = VideoRankingRecord.from_api_item(
+        {"bvid": "BV1aa0000000", "title": "\ufada教程"}, rank=1
+    )
+    assert analyzer.analyze([record]) == {"教程": 1}
 
 
 def test_keyboard_interrupt_exits_130() -> None:
