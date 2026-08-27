@@ -67,13 +67,31 @@ _BVID_STACK_PATTERN = re.compile(r"(?:bv[0-9a-z]{10})+", re.IGNORECASE)
 # （"ab23.tv" 的 "a"）是单字符，会被 minimum_token_length 丢掉。
 # BV 号边界同理不能用 \b：中文也是 \w 词字符，紧贴中文时边界永不成立、整号漏剥。
 # 改成对 ASCII 字母数字做 lookaround：紧贴汉字能命中，且仍是更长标识符一部分时不误剥。
-# ponytail: 通配任意 TLD 会误伤「3.5」「vs.」这类正常词元，故只收 B站自家域名；
-# 词云里出现成规模的他站域名噪声时，再往名单里加域名。
+# 域名一律显式名单、不通配 TLD——通配会误伤「3.5」「vs.」这类正常词元。名单外的
+# 域名出现在词云噪声里时，往 _NOISY_DOMAINS 加一行即可。
+_NOISY_DOMAINS = (
+    # B站自家。
+    "bilibili.com",
+    "b23.tv",
+    # 常见他站转发/导流源。
+    "youtube.com",
+    "youtu.be",
+    "weibo.com",
+    "weibo.cn",
+    "douyin.com",
+    "xiaohongshu.com",
+    "zhihu.com",
+    "baidu.com",
+    "acfun.cn",
+    "github.com",
+    "nicovideo.jp",
+    "tiktok.com",
+)
+_NOISY_DOMAIN_PATTERN = "|".join(domain.replace(".", r"\.") for domain in _NOISY_DOMAINS)
 _NOISE_PATTERN = re.compile(
     r"https?://[!-~]+"
     r"|www\.[!-~]+"
-    r"|(?:[a-z0-9-]+\.)*bilibili\.com(?:[/?][!-~]*)?"
-    r"|b23\.tv(?:[/?][!-~]*)?"
+    rf"|(?:[a-z0-9-]+\.)*(?:{_NOISY_DOMAIN_PATTERN})(?:[/?][!-~]*)?"
     r"|(?<![0-9A-Za-z])BV[0-9A-Za-z]{10}(?![0-9A-Za-z])",
     re.IGNORECASE,
 )
@@ -146,7 +164,8 @@ class TitleAnalyzer:
                 # 停用词过滤混进词云。全部单字都是停用词才判定为虚词串丢弃：
                 # 日语汉字词里就算有个别汉字撞上中文停用词（自転車 的「自」、本気 的
                 # 「本」），也不会整块都撞上。
-                # ponytail: 启发式；要精确切日语得上 mecab/UniDic 词典。
+                # 已知上限：这个启发式判不出全部中日虚词边界；精确切日语需要
+                # mecab/UniDic 这类重依赖，按「不为边角引入重依赖」的取舍不做。
                 if len(chunk) > 1 and all(len(piece) == 1 for piece in pieces):
                     if not all(
                         normalize_token(piece) in self._policy.stopwords for piece in pieces

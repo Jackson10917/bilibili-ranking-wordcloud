@@ -606,6 +606,20 @@ def test_schemeless_links_stripped() -> None:
     assert normalize_title("跳 b23.tv?a=1 走") == "跳 走"
 
 
+def test_foreign_domain_links_stripped() -> None:
+    # 台账债务清偿：常见他站域名入显式名单（通配 TLD 会误伤 3.5/vs. 这类正常词元）。
+    from bilibili_ranker.cleaner import normalize_title
+
+    assert normalize_title("同步更新 youtube.com/watch?v=1 求关注") == "同步更新 求关注"
+    assert normalize_title("微博 weibo.com/xxx 同id") == "微博 同id"
+    assert normalize_title("主页 m.weibo.cn/u/123 来撩") == "主页 来撩"
+    assert normalize_title("搬运自 youtu.be/abc 说明") == "搬运自 说明"
+    # IGNORECASE 对组合出的名单同样生效。
+    assert normalize_title("原曲来自 WWW.NICOVIDEO.JP/sm9 注") == "原曲来自 注"
+    # 名单外长尾域名维持不误伤；出现噪声时往 _NOISY_DOMAINS 加一行即可。
+    assert normalize_title("小众站 example.org/about 看看") == "小众站 example.org/about 看看"
+
+
 def test_link_stripping_keeps_adjacent_cjk() -> None:
     # 链接主体用 \S 会连紧贴的中日韩文字一起吞掉，整条标题被剥空。
     from bilibili_ranker.cleaner import normalize_title
