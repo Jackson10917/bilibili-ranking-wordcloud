@@ -126,16 +126,26 @@ def fetch_all_ranking(
     try:
         last_response: requests.Response | None = None
         for attempt in range(_RISK_CONTROL_ATTEMPTS):
-            response = session.get(
-                RANKING_API_URL,
-                params={"rid": 0, "type": "all"},
-                headers={
-                    "Accept": "application/json, text/plain, */*",
-                    "Referer": RANKING_PAGE_URL,
-                    "User-Agent": user_agent,
-                },
-                timeout=timeout_seconds,
-            )
+            # 连接在 body 读取阶段被截断（IncompleteRead 的 requests 包装
+            # ChunkedEncodingError）与截断的垃圾 body 同属瞬时 CDN 故障。stream=False
+            # 时 body 在 get() 内部就已读完、异常从这里抛出，而 urllib3 Retry 只管到
+            # 响应到达为止，不覆盖这个阶段，所以在原轮次上限内重试、不叠乘。最后一轮
+            # 仍失败才交给外层包装成 BilibiliAPIError。
+            try:
+                response = session.get(
+                    RANKING_API_URL,
+                    params={"rid": 0, "type": "all"},
+                    headers={
+                        "Accept": "application/json, text/plain, */*",
+                        "Referer": RANKING_PAGE_URL,
+                        "User-Agent": user_agent,
+                    },
+                    timeout=timeout_seconds,
+                )
+            except requests.exceptions.ChunkedEncodingError:
+                if attempt < _RISK_CONTROL_ATTEMPTS - 1:
+                    continue
+                raise
             # 风控拦截常伴随 HTTP 412，业务码在响应体里，所以先读体再判 HTTP 状态。
             try:
                 payload = response.json()
@@ -148,10 +158,8 @@ def fetch_all_ranking(
             # （412 + code=0 会被 raise_for_status 作为 HTTP 错误上报，至少保留了真实状态码。）
             last_response = response
 
-            # 200 但 JSON 无效：CDN 偶发返回截断/HTML 错误页，重试一次通常就好。
-            # 只在 200 上重试，412 仍交给下面的风控分支处理。
-            # ponytail: 重试传输层截断（IncompleteRead）会与 Retry(total=2) 叠乘放大请求
-            # 次数，不做；线上日志频繁出现「请求失败：截断读取」时，再为它单开低次数重试。
+            # 200 但拿不到有效 JSON：CDN 偶发返回截断/HTML 错误页或中途断连，
+            # 重试一次通常就好。只在 200 上重试，412 仍交给下面的风控分支处理。
             if (
                 payload is None
                 and response.status_code == 200

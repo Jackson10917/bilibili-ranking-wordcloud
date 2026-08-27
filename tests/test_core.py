@@ -506,6 +506,52 @@ def test_retries_on_200_with_invalid_json() -> None:
         server.server_close()
 
 
+def test_fetch_retries_on_truncated_body() -> None:
+    # CDN 在 Content-Length 读满前断连（IncompleteRead → RequestException）与截断的
+    # 垃圾 body 是同一类故障，必须同样走 200 重试路径，不能一次就报死。
+    import http.server
+    import json as _json
+    import threading
+
+    import bilibili_ranker.client as client_module
+
+    good = _json.dumps({"code": 0, "data": {"list": [{"bvid": "BV1aa0000000", "title": "测试"}]}})
+    counter = {"n": 0}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler 接口
+            counter["n"] += 1
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            if counter["n"] == 1:
+                # 谎报 Content-Length 后只发一小段就断开，逼客户端读出 IncompleteRead。
+                self.send_header("Content-Length", "200")
+                self.end_headers()
+                self.wfile.write(b'{"code": 0, "data": {"list": [{"bvid": "BV1aa')
+                self.close_connection = True
+                return
+            body = good.encode()
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_: object) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    original = client_module.RANKING_API_URL
+    client_module.RANKING_API_URL = f"http://127.0.0.1:{server.server_port}/x"
+    try:
+        result = client_module.fetch_all_ranking(timeout_seconds=5)
+        assert counter["n"] == 2, counter
+        assert result.items[0]["bvid"] == "BV1aa0000000"
+    finally:
+        client_module.RANKING_API_URL = original
+        server.shutdown()
+        server.server_close()
+
+
 def test_empty_result_exits_nonzero() -> None:
     # 接口成功但整榜解析失败时返回 0，会让定时任务把只有表头的 CSV 当成功结果。
     from unittest.mock import patch
@@ -806,12 +852,17 @@ def test_font_env_var_overrides_default() -> None:
     import os
     import tempfile
 
+    import pytest
+
     from bilibili_ranker.fonts import FontNotFoundError, resolve_font_path
 
-    with tempfile.TemporaryDirectory() as d:
-        valid = Path(d) / "myfont.ttf"
-        valid.write_bytes(b"\x00\x01\x00\x00rest")  # sfnt 魔数，能过容器校验
+    # 深度校验走 PIL 试载，有效样例直接用系统里已发现的 CJK 字体。
+    try:
+        valid = resolve_font_path(None)
+    except RuntimeError:
+        pytest.skip("环境无 CJK 字体")
 
+    with tempfile.TemporaryDirectory() as d:
         old = os.environ.get("BILIBILI_WORDCLOUD_FONT")
         try:
             os.environ["BILIBILI_WORDCLOUD_FONT"] = str(valid)
@@ -835,6 +886,8 @@ def test_font_env_var_overrides_default() -> None:
 def test_corrupt_font_rejected_before_pil() -> None:
     # 内容是垃圾的 fake.ttf 必须在校验阶段就报"损坏"，而不是拖到 PIL 抛
     # "cannot open resource"，那时用户判断不出是自己指定的字体有问题。
+    import pytest
+
     from bilibili_ranker.fonts import FontNotFoundError, resolve_font_path
 
     with tempfile.TemporaryDirectory() as d:
@@ -847,11 +900,22 @@ def test_corrupt_font_rejected_before_pil() -> None:
         else:
             raise AssertionError("垃圾内容的字体未被拒绝")
 
-        # 真实字体（含 ttc）不能被误伤。
-        for magic in (b"\x00\x01\x00\x00", b"ttcf", b"OTTO"):
-            good = Path(d) / f"good_{magic.hex()}.ttf"
-            good.write_bytes(magic + b"padding")
-            assert resolve_font_path(good) == good.resolve()
+        # 魔数对、字形表是垃圾的文件由 PIL 试载拦截——渲染走的就是同一条加载路径。
+        fake = Path(d) / "magic_only.ttf"
+        fake.write_bytes(b"\x00\x01\x00\x00garbage-glyph-table")
+        try:
+            resolve_font_path(fake)
+        except FontNotFoundError as exc:
+            assert "无法加载" in str(exc)
+        else:
+            raise AssertionError("魔数合法的损坏字体未被拒绝")
+
+        # 真实字体不能被误伤：能过校验的必然也能被渲染端加载。
+        try:
+            real_font = resolve_font_path(None)
+        except RuntimeError:
+            pytest.skip("环境无 CJK 字体")
+        assert resolve_font_path(real_font) == real_font.resolve()
 
 
 def test_zero_width_characters_do_not_split_tokens() -> None:

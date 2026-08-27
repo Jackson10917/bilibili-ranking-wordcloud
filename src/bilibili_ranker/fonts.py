@@ -71,8 +71,8 @@ def _validate_font_file(path: str | Path, *, source: str) -> Path:
         raise FontNotFoundError(f"{source} 指定的字体不存在：{resolved}")
     if resolved.suffix.casefold() not in {".ttf", ".ttc", ".otf"}:
         raise FontNotFoundError(f"{source} 不是受支持的字体文件：{resolved}")
-    # ponytail: 只校验容器魔数，字形表损坏仍要等 PIL 报错（错误信息已有字体路径）；
-    # 用户频繁遇到渲染期字体报错时，再引入 fontTools 做深度校验。
+    # 深度校验直接用 PIL 试载（见下方）：词云渲染走的就是 ImageFont.truetype 这条路，
+    # 能过校验就一定能渲染，不引入 fontTools 这类新依赖。
     try:
         with resolved.open("rb") as stream:
             header = stream.read(4)
@@ -80,6 +80,17 @@ def _validate_font_file(path: str | Path, *, source: str) -> Path:
         raise FontNotFoundError(f"{source} 指定的字体无法读取：{resolved}（{exc}）") from exc
     if header not in _SFNT_MAGICS:
         raise FontNotFoundError(f"{source} 指定的字体文件已损坏或不是字体：{resolved}")
+    # 魔数对但字形表损坏的文件在这里拦截，错误信息带字体路径，不拖到渲染期报英文错误。
+    try:
+        from PIL import ImageFont
+
+        ImageFont.truetype(str(resolved))
+    except ImportError as exc:
+        raise RuntimeError("缺少 Pillow，请先安装项目依赖") from exc
+    except (OSError, ValueError) as exc:
+        raise FontNotFoundError(
+            f"{source} 指定的字体文件已损坏，无法加载：{resolved}（{exc}）"
+        ) from exc
     return resolved.resolve()
 
 
