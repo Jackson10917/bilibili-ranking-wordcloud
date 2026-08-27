@@ -7,7 +7,7 @@ import json
 import math
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +16,14 @@ from .client import MAX_TIMEOUT_SECONDS, fetch_all_ranking
 from .fonts import resolve_font_path
 from .models import parse_ranking_records
 from .stopwords import DEFAULT_LANGUAGES, load_stopword_policy
-from .storage import create_output_bundle, write_frequencies_csv, write_records_csv
+from .storage import (
+    AGGREGATE_FREQUENCY_CSV_NAME,
+    AGGREGATE_WORDCLOUD_PNG_NAME,
+    create_output_bundle,
+    load_frequency_csvs,
+    write_frequencies_csv,
+    write_records_csv,
+)
 from .wordcloud import render_wordcloud
 
 
@@ -58,6 +65,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=2,
         help="普通词最短长度；保留词不受此限制",
+    )
+    parser.add_argument(
+        "--aggregate",
+        action="store_true",
+        help="合并输出目录已有词频 CSV，额外输出累计词频 CSV 与按累计词频渲染的词云",
     )
     return parser
 
@@ -119,10 +131,39 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     if frequencies:
         # 词频表先于渲染落盘：渲染降级成仅警告时，机器可读的产物仍然在。
         frequency_csv = write_frequencies_csv(bundle.word_frequency_csv, frequencies)
+    else:
+        print("警告：标题清洗后没有可用词元，只输出 CSV。", file=sys.stderr)
+
+    # 词云来源：默认本次词频；--aggregate 时换成跨运行累计，单次快照里九成词
+    # 只出现一次，字号编码的差异接近噪声。
+    cloud_frequencies: Mapping[str, int | float] | None = None
+    cloud_destination: Path | None = None
+    aggregate_csv: Path | None = None
+    if args.aggregate:
+        aggregate_target = args.output_dir / AGGREGATE_FREQUENCY_CSV_NAME
+        # 聚合产物自身固定名也匹配 word_frequency_*.csv，必须从合并范围排除：
+        # 否则连续两次 --aggregate 会把上次的累计值再翻一倍。
+        history = sorted(
+            path
+            for path in args.output_dir.glob("word_frequency_*.csv")
+            if path != aggregate_target
+        )
+        merged = load_frequency_csvs(history)
+        if merged:
+            aggregate_csv = write_frequencies_csv(aggregate_target, merged)
+            cloud_frequencies = merged
+            cloud_destination = args.output_dir / AGGREGATE_WORDCLOUD_PNG_NAME
+        else:
+            print("警告：输出目录没有可聚合的词频 CSV。", file=sys.stderr)
+    elif frequencies:
+        cloud_frequencies = frequencies
+        cloud_destination = bundle.wordcloud_png
+
+    if cloud_frequencies is not None and cloud_destination is not None:
         try:
             generated_wordcloud = render_wordcloud(
-                frequencies,
-                bundle.wordcloud_png,
+                cloud_frequencies,
+                cloud_destination,
                 font_path=resolved_font,
                 width=args.width,
                 height=args.height,
@@ -131,8 +172,6 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         # 超大 --width/--height 会让 PIL 抛 MemoryError，不能以 traceback 收场。
         except (RuntimeError, ValueError, OSError, MemoryError) as exc:
             print(f"警告：词云生成失败，仅输出 CSV：{exc}", file=sys.stderr)
-    else:
-        print("警告：标题清洗后没有可用词元，只输出 CSV。", file=sys.stderr)
 
     return {
         "抓取条数": len(fetched.items),
@@ -140,6 +179,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         "拒绝条数": rejected_count,
         "排行榜CSV": str(bundle.ranking_csv.resolve()),
         "词频CSV": str(frequency_csv.resolve()) if frequency_csv else None,
+        "聚合词频CSV": str(aggregate_csv.resolve()) if aggregate_csv else None,
         "词云": str(generated_wordcloud) if generated_wordcloud else None,
     }
 
