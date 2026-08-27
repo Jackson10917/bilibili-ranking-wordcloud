@@ -555,6 +555,9 @@ def test_schemeless_links_stripped() -> None:
     assert normalize_title("跳转 b23.tv 即可") == "跳转 即可"
     # 只收 B站自家域名：正常词元里的点号不能被误伤。
     assert normalize_title("版本 3.5 上线 vs. 旧版") == "版本 3.5 上线 vs. 旧版"
+    # 查询串直接挂在裸域名后（无路径）同样要整段剥掉，残片 from/tag 会混进词云。
+    assert normalize_title("信息 bilibili.com?from=tag 看看") == "信息 看看"
+    assert normalize_title("跳 b23.tv?a=1 走") == "跳 走"
 
 
 def test_link_stripping_keeps_adjacent_cjk() -> None:
@@ -1165,7 +1168,6 @@ def test_keyboard_interrupt_exits_130() -> None:
             assert main(["--output-dir", directory]) == 130
 
 
- (fix: 拼接噪声漏剥收敛到不动点；编码降级测试脱离真实渲染)
 def test_failed_run_removes_empty_placeholder_csv() -> None:
     # create_output_bundle 的 O_EXCL 占位若在 write_records_csv 之前崩溃，会永久残留
     # 0 字节 CSV 并占掉编号（下次运行跳到 -2）。失败路径必须清理空占位。

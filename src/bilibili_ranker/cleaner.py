@@ -61,7 +61,8 @@ _BVID_STACK_PATTERN = re.compile(r"(?:bv[0-9a-z]{10})+", re.IGNORECASE)
 # 链接主体限定 ASCII 可见字符（RFC 3986 的 URI 字符集本就是 ASCII，非 ASCII 要百分号编码）：
 # 用 \S 会连紧贴链接的中日韩文字一起吞掉，「传送门https://b23.tv/abc教程」会整条剥空。
 # B站标题里的链接大多是无协议裸链（「点击 b23.tv/abc 看教程」），所以 bilibili.com 与
-# b23.tv 单列一支、协议和 www. 都可省，路径可有可无。不加 \b：紧贴中文的裸链（
+# b23.tv 单列一支、协议和 www. 都可省，路径可有可无；查询串直接挂在裸域名后
+# （「bilibili.com?from=tag」）同样要吃掉，可选后缀得收 ?。不加 \b：紧贴中文的裸链（
 # 「看这里bilibili.com/video」）字符两侧都是 \w，加了反而匹配不上；漏出的前缀残片
 # （"ab23.tv" 的 "a"）是单字符，会被 minimum_token_length 丢掉。
 # BV 号边界同理不能用 \b：中文也是 \w 词字符，紧贴中文时边界永不成立、整号漏剥。
@@ -70,8 +71,8 @@ _BVID_STACK_PATTERN = re.compile(r"(?:bv[0-9a-z]{10})+", re.IGNORECASE)
 _NOISE_PATTERN = re.compile(
     r"https?://[!-~]+"
     r"|www\.[!-~]+"
-    r"|(?:[a-z0-9-]+\.)*bilibili\.com(?:/[!-~]*)?"
-    r"|b23\.tv(?:/[!-~]*)?"
+    r"|(?:[a-z0-9-]+\.)*bilibili\.com(?:[/?][!-~]*)?"
+    r"|b23\.tv(?:[/?][!-~]*)?"
     r"|(?<![0-9A-Za-z])BV[0-9A-Za-z]{10}(?![0-9A-Za-z])",
     re.IGNORECASE,
 )
