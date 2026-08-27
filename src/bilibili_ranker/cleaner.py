@@ -67,7 +67,8 @@ _BVID_STACK_PATTERN = re.compile(r"(?:bv[0-9a-z]{10})+", re.IGNORECASE)
 # （"ab23.tv" 的 "a"）是单字符，会被 minimum_token_length 丢掉。
 # BV 号边界同理不能用 \b：中文也是 \w 词字符，紧贴中文时边界永不成立、整号漏剥。
 # 改成对 ASCII 字母数字做 lookaround：紧贴汉字能命中，且仍是更长标识符一部分时不误剥。
-# ponytail: 只收 B站自家域名。通配任意 TLD 会误伤「3.5」「vs.」这类正常词元。
+# ponytail: 通配任意 TLD 会误伤「3.5」「vs.」这类正常词元，故只收 B站自家域名；
+# 词云里出现成规模的他站域名噪声时，再往名单里加域名。
 _NOISE_PATTERN = re.compile(
     r"https?://[!-~]+"
     r"|www\.[!-~]+"

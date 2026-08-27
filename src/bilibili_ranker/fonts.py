@@ -71,7 +71,8 @@ def _validate_font_file(path: str | Path, *, source: str) -> Path:
         raise FontNotFoundError(f"{source} 指定的字体不存在：{resolved}")
     if resolved.suffix.casefold() not in {".ttf", ".ttc", ".otf"}:
         raise FontNotFoundError(f"{source} 不是受支持的字体文件：{resolved}")
-    # ponytail: 只校验容器魔数；字形表损坏仍要等 PIL 报错，那时错误信息已经有字体路径了。
+    # ponytail: 只校验容器魔数，字形表损坏仍要等 PIL 报错（错误信息已有字体路径）；
+    # 用户频繁遇到渲染期字体报错时，再引入 fontTools 做深度校验。
     try:
         with resolved.open("rb") as stream:
             header = stream.read(4)

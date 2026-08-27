@@ -150,8 +150,8 @@ def fetch_all_ranking(
 
             # 200 但 JSON 无效：CDN 偶发返回截断/HTML 错误页，重试一次通常就好。
             # 只在 200 上重试，412 仍交给下面的风控分支处理。
-            # ponytail: 传输层截断（IncompleteRead）走 RequestException，requests 在 body
-            # 读取阶段已出 urllib3 Retry 范围，重试它会与 Retry(total=2) 叠乘，不做。
+            # ponytail: 重试传输层截断（IncompleteRead）会与 Retry(total=2) 叠乘放大请求
+            # 次数，不做；线上日志频繁出现「请求失败：截断读取」时，再为它单开低次数重试。
             if (
                 payload is None
                 and response.status_code == 200
