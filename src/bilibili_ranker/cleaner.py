@@ -30,7 +30,7 @@ _CJK_RANGE = r"\u3005\u3007\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0
 
 # 拉丁字母词元包含重音字符（café、déjà），否则会被拆成单字母碎片。
 # 区间挖掉 ×(U+00D7) 和 ÷(U+00F7)：它们是数学符号，不是字母（XML NameChar 经典区间）。
-# 补上 Latin Extended Additional（U+1E00-U+1EFF，含 ẞ 和越南语声调字母），整段都是字母。
+# Latin Extended Additional（U+1E00-U+1EFF，含 ẞ 和越南语声调字母）整段都是字母。
 _LATIN_LETTERS = r"A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u024f\u1e00-\u1eff"
 _LATIN_ALNUM = r"A-Za-z0-9\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u024f\u1e00-\u1eff"
 
