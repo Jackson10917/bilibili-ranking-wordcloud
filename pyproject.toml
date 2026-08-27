@@ -27,7 +27,7 @@ bilibili-rank = "bilibili_ranker.cli:main"
 [project.optional-dependencies]
 # <10 上界放开到含修复 PYSEC-2026-1845 的 9.0.3+（共享 UNIX 主机的本地提权/DoS）；
 # 全套测试在 9.x 下实测通过，CI 矩阵按最新解析版本持续验证。
-test = ["pytest>=7,<10"]
+test = ["hypothesis>=6,<7", "pytest>=7,<10"]
 lint = ["ruff==0.16.4"]
 
 [tool.ruff]
@@ -49,3 +49,4 @@ bilibili_ranker = [
   "resources/stopwords/*.txt",
   "resources/stopwords/*.md",
 ]
+
