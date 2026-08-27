@@ -36,9 +36,13 @@
 │     ├─ allowlist.txt
 │     └─ README.md
 ├─ tests/
-│  └─ test_core.py
+│  ├─ test_core.py
+│  └─ fixtures/ranking_v2_sample.json
 ├─ assets/
 │  └─ wordcloud-sample.png
+├─ .github/
+│  ├─ workflows/ci.yml
+│  └─ dependabot.yml
 ├─ .gitignore
 ├─ LICENSE
 ├─ pyproject.toml
@@ -96,8 +100,10 @@ python -m bilibili_ranker --output-dir output
 --max-words 300                词云图最大词数
 --timeout 15                   API 请求超时秒数，取值大于 0 且不超过 86400（0、负数、
                                inf/nan 或超大值都会直接拒绝）
---rid 0                        排行榜分区 ID；0 为全站榜，其余为上游定义的分区 rid
-                               （如 1 动画、4 游戏），语义跟随上游接口
+--rid 0                        排行榜分区 ID；0 为全站榜，其余为上游定义的分区 rid。
+                               常用：1 动画、3 音乐、4 游戏、5 娱乐、36 知识、
+                               119 鬼畜、129 舞蹈、155 时尚、181 影视、188 科技
+                               （对照来自社区文档，以上游实际为准）
 ```
 
 ## 输出
@@ -196,6 +202,7 @@ https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all
 
 - 默认 User-Agent 是写死的现代 Chrome 指纹，会随浏览器版本演进而过时。请求被风控拦截且重试无效时，优先尝试用 `BILIBILI_UA` 覆盖为当前浏览器版本。
 - 风控处理建立在 ranking v2 接口当前不需要 WBI 签名的行为上：`-352`/HTTP 412 时刷新 buvid cookie 重试。上游一旦对接口加签，这条路会失效，届时需要实现 WBI 签名。
+- 本项目面向日更粒度的榜单，例行任务每天一次足够。请自行控制抓取频率，不要高频轮询，使用时遵守 B 站的用户协议。
 
 ## 许可证
 
