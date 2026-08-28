@@ -6,6 +6,7 @@ import re
 import unicodedata
 from collections import Counter
 from collections.abc import Iterable
+from pathlib import Path
 
 from .models import VideoRankingRecord
 from .stopwords import StopwordPolicy, normalize_token
@@ -22,6 +23,19 @@ def _jieba_lcut(text: str) -> list[str]:
     _jieba.setLogLevel("ERROR")
     # list() 同时消掉无存根依赖的 Any 返回值，满足 --strict 的 no-any-return。
     return list(_jieba.lcut(text, cut_all=False))
+
+
+def load_user_dictionary(path: str | Path) -> None:
+    """加载 jieba 用户词典，保证专有名词（游戏名、番名）不被切碎。
+
+    jieba 只有通用中文词典，星穹铁道、明日方舟这类新词会被拆成碎片分头进榜；
+    词典格式见 jieba 文档，应在首次分词前调用。
+    """
+
+    import jieba as _jieba
+
+    _jieba.setLogLevel("ERROR")
+    _jieba.load_userdict(str(path))
 
 
 def _has_out_of_dict_char(chunk: str) -> bool:
@@ -63,6 +77,11 @@ _NUMBER_PATTERN = re.compile(r"\d+(?:\.\d+)?")
 # 「bv+10 位字母数字」的重复，自然语言的词没有这种形状，整体丢弃不误伤。
 _BVID_STACK_PATTERN = re.compile(r"(?:bv[0-9a-z]{10})+", re.IGNORECASE)
 
+# 标题里的分发文件名（setup.exe、说明.pdf）是噪声不是词；` . ` 是词内连接符，
+# 剥除名单盖不住它们，落到词元阶段取点号末段判扩展名——裸的 pdf/exe 同样丢弃，
+# 词云场景下它们不承载话题信息。出现新形状往里加一行即可。
+_FILE_EXTENSIONS = frozenset({"apk", "exe", "pdf", "zip"})
+
 
 # 链接和 BV 号是标识符不是词，停用词表只能收精确词、盖不住域名和随机 BV 号，分词前整段剥掉。
 # 主体限定 ASCII 可见字符（RFC 3986 本就是 ASCII）：\S 会把紧贴链接的中日韩文字一起吞掉。
@@ -97,6 +116,8 @@ _NOISE_PATTERN = re.compile(
     rf"https?://{_URL_CHARS}+"
     rf"|www\.{_URL_CHARS}+"
     rf"|(?:[a-z0-9-]+\.)*(?:{_NOISY_DOMAIN_PATTERN})(?:[/?]{_URL_CHARS}*)?"
+    # 邮箱整体剥除：@ 前后片段都不是词元形状（zhang.san、gmail.com），逐段剥会漏。
+    r"|[a-z0-9._%+\-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+"
     r"|(?<![0-9A-Za-z])BV[0-9A-Za-z]{10}(?![0-9A-Za-z])",
     re.IGNORECASE,
 )
@@ -189,6 +210,8 @@ class TitleAnalyzer:
         if _NUMBER_PATTERN.fullmatch(token):
             return None
         if _BVID_STACK_PATTERN.fullmatch(token):
+            return None
+        if token.rpartition(".")[2] in _FILE_EXTENSIONS:
             return None
         # 日文、西里尔按整块匹配，块内混着符号（・U+30FB、҂U+0482）。
         # 逐块手挖区间会漏，直接要求词元至少含一个字母。

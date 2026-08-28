@@ -6,12 +6,13 @@ import argparse
 import json
 import math
 import os
+import re
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from .cleaner import TitleAnalyzer, deduplicate_records
+from .cleaner import TitleAnalyzer, deduplicate_records, load_user_dictionary
 from .client import MAX_TIMEOUT_SECONDS, fetch_all_ranking
 from .fonts import resolve_font_path
 from .models import parse_ranking_records
@@ -25,6 +26,9 @@ from .storage import (
     write_records_csv,
 )
 from .wordcloud import render_wordcloud
+
+# --aggregate 只合并时间戳形态（含 -2 跳号后缀）的词频 CSV。
+_TIMESTAMPED_FREQUENCY_PATTERN = re.compile(r"word_frequency_\d{8}T\d{6}Z(?:-\d+)?\.csv")
 
 
 def _language_codes(value: str) -> tuple[str, ...]:
@@ -67,6 +71,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="普通词最短长度；保留词不受此限制",
     )
     parser.add_argument(
+        "--user-dict",
+        type=Path,
+        help="jieba 用户词典路径（dict 格式），专有名词不被切碎",
+    )
+    parser.add_argument(
         "--aggregate",
         action="store_true",
         help="合并输出目录已有词频 CSV，输出累计词频 CSV 与按累计词频渲染的词云"
@@ -89,6 +98,10 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
 
     # 同理先探输出目录：CSV 先落盘的设计下，目录不可写会让抓完的整榜数据白抓一遍。
     args.output_dir.mkdir(parents=True, exist_ok=True)
+
+    # 用户词典在首次分词前加载；文件不存在时 jieba 抛 OSError，同样不用等抓完整榜才报。
+    if args.user_dict is not None:
+        load_user_dictionary(args.user_dict)
 
     fetched = fetch_all_ranking(timeout_seconds=args.timeout, rid=args.rid)
 
@@ -137,17 +150,18 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
 
     # 词云来源：默认本次词频；--aggregate 时换成跨运行累计，单次快照里九成词
     # 只出现一次，字号编码的差异接近噪声。
-    cloud_frequencies: Mapping[str, int | float] | None = None
+    cloud_frequencies: Mapping[str, int] | None = None
     cloud_destination: Path | None = None
     aggregate_csv: Path | None = None
     if args.aggregate:
         aggregate_target = args.output_dir / AGGREGATE_FREQUENCY_CSV_NAME
-        # 聚合产物自身固定名也匹配 word_frequency_*.csv，必须从合并范围排除：
-        # 否则连续两次 --aggregate 会把上次的累计值再翻一倍。
+        # 白名单只收时间戳形态（含 -2 跳号后缀）：聚合产物固定名与备份/改名产物
+        # （word_frequency_aggregate-2.csv 这类）都不匹配——前者防连续两次 --aggregate
+        # 把上次累计值翻倍，后者防用户备份静默污染累计。
         history = sorted(
             path
             for path in args.output_dir.glob("word_frequency_*.csv")
-            if path != aggregate_target
+            if _TIMESTAMPED_FREQUENCY_PATTERN.fullmatch(path.name)
         )
         merged = load_frequency_csvs(history)
         if merged:
