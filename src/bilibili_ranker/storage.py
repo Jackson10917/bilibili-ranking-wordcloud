@@ -39,6 +39,8 @@ def create_output_bundle(root: str | Path, fetched_at: datetime) -> OutputBundle
     # exists()：后者在"检查"和"写入"之间有窗口，同秒并发的两个进程会拿到同一编号，
     # 后写者的 os.replace 直接覆盖先写者的结果。PNG 只做存在性检查，跟随 CSV 的编号
     # （编号由占位成败唯一确定，因此并发进程不会撞 PNG），避免词云不生成时留下空文件。
+    # 词频 CSV 同样只查存在性：--aggregate 靠攒词频 CSV 做累计，ranking CSV 常被清掉
+    # 只留词频，不查的话同秒重跑会把它 os.replace 覆盖掉，累计历史静默少一天。
     counter = 2
     while True:
         try:
@@ -46,13 +48,13 @@ def create_output_bundle(root: str | Path, fetched_at: datetime) -> OutputBundle
         except FileExistsError:
             pass
         else:
-            if not wordcloud_png.exists():
+            if not wordcloud_png.exists() and not word_frequency_csv.exists():
                 return OutputBundle(
                     ranking_csv=ranking_csv,
                     wordcloud_png=wordcloud_png,
                     word_frequency_csv=word_frequency_csv,
                 )
-            # PNG 已被占用：撤掉刚占位的空 CSV，整对跳号。
+            # PNG 或词频 CSV 已被占用：撤掉刚占位的空 CSV，整对跳号。
             ranking_csv.unlink(missing_ok=True)
         ranking_csv = base / f"ranking_{label}-{counter}.csv"
         wordcloud_png = base / f"wordcloud_{label}-{counter}.png"

@@ -24,6 +24,15 @@ def _jieba_lcut(text: str) -> list[str]:
     return list(_jieba.lcut(text, cut_all=False))
 
 
+def _has_out_of_dict_char(chunk: str) -> bool:
+    """块内是否含 jieba 中文词典外的字符——日文汉字（転/気/況）的语种信号。"""
+
+    import jieba as _jieba
+
+    _jieba.initialize()
+    return any(_jieba.dt.FREQ.get(character, 0) == 0 for character in chunk)
+
+
 # U+3005 々 是叠字符（人々、時々、様々），U+3007 〇 是表意数字零，两者 Unicode 都归 CJK
 # Symbols 块，不在统一表意文字区间里，漏掉会把「人々」整词切碎后丢干净。
 _CJK_RANGE = r"\u3005\u3007\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U000323af"
@@ -155,19 +164,18 @@ class TitleAnalyzer:
                 tokens.extend(pieces)
                 # jieba 只有中文词典，日文汉字词（実況、洗濯）会被全切成单字后被
                 # minimum_token_length 丢干净，整块补留一份；--minimum-token-length 1
-                # 时单字本就能存活，再留整块会同处文本计两次，不回退。中文虚词串
-                # （「他也是」）整块会绕过停用词过滤，全部单字都是停用词才判为虚词串
-                # 丢弃；日语汉字词只个别字撞中文停用词（自転車的「自」），不受影响。
-                # 已知上限：精确切日语需 mecab/UniDic 重依赖，不为边角引入。
+                # 时单字本就能存活，再留整块会同处文本计两次，不回退。但「全切成单字」
+                # 分不出中日文——中文单字连排（猫和狗、吃了吗）也全在词典里，补回整块
+                # 会把标题碎片伪造成词，且与 min-len=1 的子集关系矛盾；语种信号用
+                # _has_out_of_dict_char。已知上限：対戦这类日式字形全在词典里的词救
+                # 不回；精确切日语需 mecab/UniDic 重依赖，不为边角引入。
                 if (
                     self._minimum_token_length > 1
                     and len(chunk) > 1
                     and all(len(piece) == 1 for piece in pieces)
+                    and _has_out_of_dict_char(chunk)
                 ):
-                    if not all(
-                        normalize_token(piece) in self._policy.stopwords for piece in pieces
-                    ):
-                        tokens.append(chunk)
+                    tokens.append(chunk)
             else:
                 tokens.append(chunk)
         return tokens
