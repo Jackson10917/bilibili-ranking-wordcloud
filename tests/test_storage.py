@@ -89,6 +89,25 @@ def test_output_bundle_releases_placeholder_when_png_taken() -> None:
         assert not (root / "ranking_20240101T000000Z.csv").exists()
 
 
+def test_output_bundle_releases_placeholder_when_frequency_csv_taken() -> None:
+    # --aggregate 靠攒词频 CSV 做累计，ranking CSV 可能被清掉只留词频。同秒重跑时
+    # ranking 占位能成功、编号不跳，词频 CSV 不查存在性就会被 os.replace 静默覆盖，
+    # 累计历史少一天——与 PNG 一样纳入存在性检查，整对跳号。
+    from bilibili_ranker.storage import create_output_bundle
+
+    moment = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "word_frequency_20240101T000000Z.csv").touch()
+
+        bundle = create_output_bundle(root, moment)
+        assert bundle.ranking_csv.name == "ranking_20240101T000000Z-2.csv"
+        assert bundle.word_frequency_csv.name == "word_frequency_20240101T000000Z-2.csv"
+        assert bundle.wordcloud_png.name == "wordcloud_20240101T000000Z-2.png"
+        # 被跳过编号的占位必须撤销，不留 0 字节垃圾。
+        assert not (root / "ranking_20240101T000000Z.csv").exists()
+
+
 def test_output_bundle_suffix_keeps_pair_aligned() -> None:
     # 同一秒重复运行时追加 -2/-3 后缀，且 CSV 与 PNG 共用同一后缀：
     # 拆开编号会产出 ranking_...-3.csv 配 wordcloud_...-2.png 这种无法配对的组合。
