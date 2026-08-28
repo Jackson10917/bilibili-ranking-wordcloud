@@ -151,7 +151,7 @@ def write_records_csv(destination: Path, records: Iterable[VideoRankingRecord]) 
 FREQUENCY_CSV_HEADERS = ("词", "词频")
 
 
-def write_frequencies_csv(destination: Path, frequencies: Mapping[str, int | float]) -> Path:
+def write_frequencies_csv(destination: Path, frequencies: Mapping[str, int]) -> Path:
     rows = ({"词": _spreadsheet_safe(word), "词频": count} for word, count in frequencies.items())
     return _atomic_csv_write(destination, FREQUENCY_CSV_HEADERS, rows)
 
