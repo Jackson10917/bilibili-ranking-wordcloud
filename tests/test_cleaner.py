@@ -281,6 +281,50 @@ def test_single_char_fallback_requires_out_of_dict_char() -> None:
     assert single.analyze([record]) == {"猫": 1, "狗": 1}
 
 
+def test_email_and_filename_noise_stripped() -> None:
+    # 邮箱整体剥除：@ 前后片段（zhang.san、gmail.com）都不是词元形状，逐段剥会漏。
+    from bilibili_ranker.cleaner import normalize_title
+
+    assert normalize_title("联系 zhang.san@gmail.com 谢谢") == "联系 谢谢"
+    assert normalize_title("邮箱 abc@qq.com 联系我") == "邮箱 联系我"
+    # 无 @ 的名单外裸域名维持既有语义，不误伤。
+    assert normalize_title("搜 qq.com 一下") == "搜 qq.com 一下"
+
+    # 词元级丢弃：分发文件名（setup.exe）与 CJK 相邻的扩展名碎片（说明.pdf 的 pdf）
+    # 都按点号末段判扩展名；裸的 pdf/exe 在词云里不承载话题信息，一并丢弃。
+    analyzer = TitleAnalyzer(load_stopword_policy())
+
+    def tokens(title: str) -> dict[str, int]:
+        record = VideoRankingRecord.from_api_item({"bvid": "BV1aa0000000", "title": title}, rank=1)
+        return analyzer.analyze([record])
+
+    assert tokens("下载 setup.exe 安装") == {"下载": 1, "安装": 1}
+    assert "pdf" not in tokens("下载 说明.pdf 教程")
+    # 版本号与缩写词不受影响。
+    assert tokens("版本 3.5 上线 vs. 旧版") == {"版本": 1, "上线": 1, "vs": 1, "旧版": 1}
+
+
+def test_user_dictionary_keeps_proper_nouns_whole() -> None:
+    # jieba 通用词典没有星穹铁道，拆成 星穹+铁道 分头进榜；用户词典加载后整词保留。
+    import tempfile
+    from pathlib import Path
+
+    from bilibili_ranker.cleaner import load_user_dictionary
+
+    analyzer = TitleAnalyzer(load_stopword_policy())
+    record = VideoRankingRecord.from_api_item(
+        {"bvid": "BV1aa0000000", "title": "崩坏星穹铁道 攻略"}, rank=1
+    )
+    assert "星穹铁道" not in analyzer.analyze([record])
+
+    with tempfile.TemporaryDirectory() as directory:
+        dict_file = Path(directory) / "userdict.txt"
+        dict_file.write_text("星穹铁道\n", encoding="utf-8")
+        load_user_dictionary(dict_file)
+
+    assert "星穹铁道" in analyzer.analyze([record])
+
+
 def test_zero_width_characters_do_not_split_tokens() -> None:
     # B站"防和谐"标题会插零宽空格（U+200B，Cf 类，NFKC 不动它、split() 也不认），
     # 不剔除的话「黑​丝」被劈成两个单字块，双双被 minimum_token_length 丢掉。
