@@ -396,3 +396,53 @@ def test_cli_aggregate_merges_history_and_skips_itself() -> None:
                 "模型": "3",
             }
         assert destinations == [root / AGGREGATE_WORDCLOUD_PNG_NAME] * 2
+
+
+def test_cli_aggregate_ignores_non_timestamp_frequency_files() -> None:
+    # 合并白名单只收时间戳形态（含 -2 跳号后缀）的词频 CSV：备份/改名产物
+    # （word_frequency_aggregate-2.csv 这类）不匹配，不会静默污染累计。
+    from unittest.mock import patch
+
+    import bilibili_ranker.cli as cli_module
+    from bilibili_ranker.client import RankingFetchResult
+    from bilibili_ranker.storage import AGGREGATE_FREQUENCY_CSV_NAME
+
+    def fetched_on(day: int) -> RankingFetchResult:
+        return RankingFetchResult(
+            fetched_at=datetime(2024, 3, day, tzinfo=timezone.utc),
+            items=({"bvid": "BV1aa0000000", "title": "魔方教程"},),
+        )
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "word_frequency_20240101T000000Z.csv").write_text(
+            "词,词频\n魔方,2\n", encoding="utf-8-sig"
+        )
+        # 模拟用户给聚合产物做的备份：固定名 + 跳号后缀。
+        (root / "word_frequency_aggregate-2.csv").write_text(
+            "词,词频\n魔方,8\n", encoding="utf-8-sig"
+        )
+
+        with (
+            patch.object(cli_module, "fetch_all_ranking", lambda **_: fetched_on(1)),
+            patch.object(cli_module, "render_wordcloud", lambda *args, **__: Path(str(args[1]))),
+        ):
+            assert main(["--output-dir", directory, "--aggregate"]) == 0
+
+        with (root / AGGREGATE_FREQUENCY_CSV_NAME).open(encoding="utf-8-sig", newline="") as stream:
+            counts = {row["词"]: row["词频"] for row in csv.DictReader(stream)}
+        # 魔方 = 历史 2 + 本次 1；备份里的 8 没被并进来。
+        assert counts == {"魔方": "3", "教程": "1"}
+
+
+def test_cli_user_dict_missing_file_fails_before_network() -> None:
+    # 用户词典路径错误必须在抓取前报错退出（退出码 1）；fetch 若被触达会让测试炸出
+    # ZeroDivisionError，保证「不白抓一整榜」是实测的而不是假设的。
+    from unittest.mock import patch
+
+    import bilibili_ranker.cli as cli_module
+
+    with tempfile.TemporaryDirectory() as directory:
+        missing = Path(directory) / "nope.txt"
+        with patch.object(cli_module, "fetch_all_ranking", lambda **_: 1 / 0):
+            assert main(["--output-dir", directory, "--user-dict", str(missing)]) == 1
