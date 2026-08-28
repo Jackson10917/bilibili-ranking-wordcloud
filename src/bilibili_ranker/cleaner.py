@@ -57,6 +57,9 @@ _BVID_STACK_PATTERN = re.compile(r"(?:bv[0-9a-z]{10})+", re.IGNORECASE)
 
 # 链接和 BV 号是标识符不是词，停用词表只能收精确词、盖不住域名和随机 BV 号，分词前整段剥掉。
 # 主体限定 ASCII 可见字符（RFC 3986 本就是 ASCII）：\S 会把紧贴链接的中日韩文字一起吞掉。
+# 可见字符挖掉 , ;（_URL_CHARS）：标题里「链接,词」无空格拼接时，后面的词元会被连带吞掉
+# 且不报任何错；留在原地的 , ; 本就不是词元，分词自然消失。, ; 在 URL 里合法但罕见，
+# 真遇到会漏出尾巴碎片——词云场景丢词比多一个碎片更难察觉。
 # B站标题多是无协议裸链，bilibili.com 与 b23.tv 单列一支、协议和 www. 可省，路径和挂在
 # 裸域名后的查询串一并吃掉。边界不用 \b——CJK 也是 \w 词字符，紧贴中文时永不成立——
 # 改对 ASCII 字母数字做 lookaround。域名显式名单、不通配 TLD，避免误伤正常词元；
@@ -80,10 +83,11 @@ _NOISY_DOMAINS = (
     "tiktok.com",
 )
 _NOISY_DOMAIN_PATTERN = "|".join(domain.replace(".", r"\.") for domain in _NOISY_DOMAINS)
+_URL_CHARS = r"[!-+\--:<-~]"
 _NOISE_PATTERN = re.compile(
-    r"https?://[!-~]+"
-    r"|www\.[!-~]+"
-    rf"|(?:[a-z0-9-]+\.)*(?:{_NOISY_DOMAIN_PATTERN})(?:[/?][!-~]*)?"
+    rf"https?://{_URL_CHARS}+"
+    rf"|www\.{_URL_CHARS}+"
+    rf"|(?:[a-z0-9-]+\.)*(?:{_NOISY_DOMAIN_PATTERN})(?:[/?]{_URL_CHARS}*)?"
     r"|(?<![0-9A-Za-z])BV[0-9A-Za-z]{10}(?![0-9A-Za-z])",
     re.IGNORECASE,
 )
