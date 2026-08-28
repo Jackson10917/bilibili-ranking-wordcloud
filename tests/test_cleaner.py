@@ -165,6 +165,21 @@ def test_link_stripping_keeps_adjacent_cjk() -> None:
     assert normalize_title("https://b23.tv/abc?a=1#f") == ""
 
 
+def test_link_stripping_stops_at_comma_and_semicolon() -> None:
+    # 「链接,词」无空格拼接在转载标题里不算罕见：, ; 若混进链接主体，后面的词元会被
+    # 连带吞掉且静默无报错。剥完留在原地的 , ; 本就不是词元，分词自然消失。
+    from bilibili_ranker.cleaner import normalize_title
+
+    assert normalize_title("https://b23.tv/abc,Minecraft 真好玩") == ",Minecraft 真好玩"
+    assert normalize_title("看 https://example.org/a;RTX4090 评测") == "看 ;RTX4090 评测"
+
+    analyzer = TitleAnalyzer(load_stopword_policy())
+    record = VideoRankingRecord.from_api_item(
+        {"bvid": "BV1aa0000000", "title": "https://b23.tv/abc,Minecraft 真好玩"}, rank=1
+    )
+    assert analyzer.analyze([record]) == {"minecraft": 1, "真好玩": 1}
+
+
 def test_bvid_noise_stripped_adjacent_to_cjk() -> None:
     # \b 按 Unicode 词符判界，中文字符也算词字符，紧贴中文的 BV 号永远匹配不上，
     # 噪声 bv1xx411c7md 会整号混进词云。改用 ASCII 边界后相邻汉字必须保留。
