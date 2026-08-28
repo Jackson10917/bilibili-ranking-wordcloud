@@ -242,9 +242,10 @@ def test_japanese_kanji_word_survives_jieba() -> None:
 def test_chinese_function_word_runs_not_kept_whole() -> None:
     """全单字回退分支必须只救日语，不能把中文虚词串整块放进词云。
 
-    「他也是」被 jieba 切成三个单字，逐字都是停用词而整块不是，不加判断就会绕过过滤。
-    反向情况：日语汉字词里个别汉字撞上中文停用词（自転車 的「自」、本気 的「本」）时
-    仍须保留，所以判据是"全部单字都是停用词"，而不是"存在停用词"。
+    「他也是」被 jieba 切成三个单字，整块补回会绕过停用词与最短长度过滤。
+    语种信号是「块内含 jieba 词典外字符」：中文单字连排全在词典里，一律拒绝；
+    日语汉字（転/気/況）不在中文词典，个别字撞上中文停用词（自転車 的「自」、
+    本気 的「本」）也仍须保留。
     """
 
     analyzer = TitleAnalyzer(load_stopword_policy())
@@ -258,6 +259,26 @@ def test_chinese_function_word_runs_not_kept_whole() -> None:
 
     for word in ("自転車", "本気", "実況"):
         assert word in tokens(word), word
+
+
+def test_single_char_fallback_requires_out_of_dict_char() -> None:
+    # 「猫和狗」「吃了吗」被 jieba 全切成单字且都在中文词典里，整块补回会把标题
+    # 碎片伪造成一个词，还与 min-len=1 的结果矛盾——min-len=2 的词表必须是它的
+    # 子集。回退只对含词典外字符（日文汉字）的块触发；対戦这类字形全在词典的
+    # 日语词救不回，是已知上限。
+    analyzer = TitleAnalyzer(load_stopword_policy())
+
+    def tokens(title: str) -> dict[str, int]:
+        record = VideoRankingRecord.from_api_item({"bvid": "BV1aa0000000", "title": title}, rank=1)
+        return analyzer.analyze([record])
+
+    for noise in ("猫和狗", "我把它吃了", "吃了吗"):
+        assert noise not in tokens(noise), noise
+
+    # 同一标题在 min-len=1 下给出单字词，两种设置不再互相矛盾。
+    single = TitleAnalyzer(load_stopword_policy(), minimum_token_length=1)
+    record = VideoRankingRecord.from_api_item({"bvid": "BV1aa0000000", "title": "猫和狗"}, rank=1)
+    assert single.analyze([record]) == {"猫": 1, "狗": 1}
 
 
 def test_zero_width_characters_do_not_split_tokens() -> None:
