@@ -398,20 +398,33 @@ def test_analyzer_keeps_allowlisted_word() -> None:
 
 def test_lazy_imports_report_friendly_errors() -> None:
     # jieba / stopwordsiso / wordcloud 缺依赖时都要给出中文安装提示，而不是 ImportError。
+    # jieba 的四个入口（分词、两个词典加载、语种信号）共用一个导入函数：
+    # CLI 先加载词典再分词，只包 _jieba_lcut 一处的话友好错误在主路径上不可达。
     import sys as _sys
     from unittest.mock import patch
 
-    from bilibili_ranker.cleaner import _jieba_lcut
+    from bilibili_ranker.cleaner import (
+        _has_out_of_dict_char,
+        _jieba_lcut,
+        load_default_dictionary,
+        load_user_dictionary,
+    )
     from bilibili_ranker.stopwords import load_stopword_policy
     from bilibili_ranker.wordcloud import render_wordcloud
 
     with patch.dict(_sys.modules, {"jieba": None}):
-        try:
-            _jieba_lcut("测试")
-        except RuntimeError as exc:
-            assert str(exc) == "缺少 jieba，请先安装项目依赖"
-        else:
-            raise AssertionError("缺 jieba 未报友好错误")
+        for call in (
+            lambda: _jieba_lcut("测试"),
+            lambda: load_default_dictionary(),
+            lambda: load_user_dictionary("不存在的词典.txt"),
+            lambda: _has_out_of_dict_char("転生"),
+        ):
+            try:
+                call()
+            except RuntimeError as exc:
+                assert str(exc) == "缺少 jieba，请先安装项目依赖"
+            else:
+                raise AssertionError("缺 jieba 未报友好错误")
 
     with patch.dict(_sys.modules, {"stopwordsiso": None}):
         try:
