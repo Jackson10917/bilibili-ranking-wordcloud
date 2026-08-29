@@ -122,9 +122,7 @@ output/
 
 加 `--no-fetch` 时本次不请求接口、不写时间戳产物，只对目录里已有的词频 CSV 重新聚合并重渲染累计词云——换字体、调尺寸、重出图不再要求联网再抓一次榜；输出目录还没有任何词频 CSV 时只警告不报错。此时摘要里 `fetched`/`accepted`/`rejected` 为 0，`ranking_csv`/`frequency_csv` 为 `null`。
 
-仓库自带日更闭环：`.github/workflows/daily-data.yml` 每天北京时间 9 点自动抓一次榜，把时间戳 CSV 快照与累计产物提交回仓库的 `data/` 目录（Actions 页面也可手动触发）。本地想自己攒数据，固定一个 `--output-dir` 每天跑一次即可，效果相同。`data/wordcloud_aggregate.png` 是按累计词频渲染的最新词云：
-
-![累计词云（每日自动更新）](data/wordcloud_aggregate.png)
+仓库自带日更闭环：`.github/workflows/daily-data.yml` 每天北京时间 9 点自动抓一次榜，把带时间戳的排行榜与词频 CSV 提交回仓库的 `data/` 目录（Actions 页面也可手动触发），数据自 2026-08-29 起累计。本地想自己攒数据，固定一个 `--output-dir` 每天跑一次即可，效果相同。词云 PNG 不入库：时间戳词云字号不编码有效信息，累计词云是每日重写的二进制，每天提交一张会把仓库历史撑爆；累计词频 CSV 始终在仓库里，想看词云随时按上一节的 `--aggregate --no-fetch` 离线重渲染。
 
 若接口返回成功但整榜记录全部无法解析（例如上游字段变更），退出码为 1，同时仍写出只含表头的 CSV 便于排查——自动化任务不会把这种情况误判为成功。
 

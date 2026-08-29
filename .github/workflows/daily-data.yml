@@ -1,6 +1,6 @@
 name: Daily data
 
-# 每天抓一次榜，把时间戳快照与累计词云提交回 data/——--aggregate 的跨天累计
+# 每天抓一次榜，把带时间戳的 CSV 快照与累计词频提交回 data/——--aggregate 的跨天累计
 # 靠这个目录里的日积月累闭环，本地固定 --output-dir 手动日跑同样有效。
 on:
   schedule:
@@ -26,19 +26,16 @@ jobs:
           python-version: "3.13"
       - run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
       - run: python -m pip install -e .
-      - run: python -m bilibili_ranker --output-dir data
-      # 快照刚落盘，离线重渲染即可；再抓一次榜是无谓的重复请求。
-      - run: python -m bilibili_ranker --output-dir data --aggregate --no-fetch
+      # --aggregate 一步到位：本次时间戳词频 CSV 落盘后并入累计（cli 的聚合块会把
+      # 刚写出的快照一起合并），时间戳词云不产出，无需先单跑再 --no-fetch 重渲染。
+      - run: python -m bilibili_ranker --output-dir data --aggregate
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # 只收 CSV 快照与累计词云：时间戳 PNG 是单次快照渲染，字号不编码有效信息，
-          # 且每日一张二进制只会撑爆仓库历史；要用可从 CSV 重渲染。
+          # 只收 CSV：时间戳 PNG 字号不编码有效信息，累计 PNG 是每日重写的二进制，
+          # 每天提交任何一张都会撑爆仓库历史；词云随时可用 --aggregate --no-fetch 重渲染。
           git add data/*.csv
-          if [ -f data/wordcloud_aggregate.png ]; then
-            git add data/wordcloud_aggregate.png
-          fi
           if git diff --cached --quiet; then
             echo "没有新增数据，跳过提交"
           else
