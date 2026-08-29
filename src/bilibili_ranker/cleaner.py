@@ -9,18 +9,26 @@ from collections import Counter
 from collections.abc import Iterable
 from importlib.resources import as_file, files
 from pathlib import Path
+from types import ModuleType
+from typing import cast
 
 from .models import VideoRankingRecord
 from .stopwords import StopwordPolicy, normalize_token
 
 
-def _jieba_lcut(text: str) -> list[str]:
+def _import_jieba() -> ModuleType:
     """延迟导入 jieba，缺依赖时给出与 wordcloud/stopwordsiso 一致的友好错误。"""
     try:
         import jieba as _jieba
     except ImportError as exc:
         raise RuntimeError("缺少 jieba，请先安装项目依赖") from exc
+    # jieba 无类型存根（ignore_missing_imports），按 Any 返回会触发 no-any-return。
+    return cast(ModuleType, _jieba)
+
+
+def _jieba_lcut(text: str) -> list[str]:
     # 首次分词往 stderr 打 "Building prefix dict ..."，压掉；list() 消 Any 满足 no-any-return。
+    _jieba = _import_jieba()
     _jieba.setLogLevel("ERROR")
     return list(_jieba.lcut(text, cut_all=False))
 
@@ -28,8 +36,7 @@ def _jieba_lcut(text: str) -> list[str]:
 def load_user_dictionary(path: str | Path) -> None:
     """加载 jieba 用户词典，保证专有名词（游戏名、番名）不被切碎；应在首次分词前调用。"""
 
-    import jieba as _jieba
-
+    _jieba = _import_jieba()
     _jieba.setLogLevel("ERROR")
     _jieba.load_userdict(str(path))
 
@@ -43,8 +50,7 @@ DEFAULT_USER_DICT = (
 def load_default_dictionary() -> None:
     """加载内置热词表；高频专有名词（游戏名、番名）默认不被切碎。"""
 
-    import jieba as _jieba
-
+    _jieba = _import_jieba()
     _jieba.setLogLevel("ERROR")
     with as_file(DEFAULT_USER_DICT) as path:
         _jieba.load_userdict(str(path))
@@ -53,8 +59,7 @@ def load_default_dictionary() -> None:
 def _has_out_of_dict_char(chunk: str) -> bool:
     """块内是否含 jieba 中文词典外的字符——日文汉字（転/気/況）的语种信号。"""
 
-    import jieba as _jieba
-
+    _jieba = _import_jieba()
     _jieba.initialize()
     # dt.FREQ 是私有 API（依赖钉 jieba<1）；上游改结构时放弃信号、退回不补整块。
     freq: object = getattr(getattr(_jieba, "dt", None), "FREQ", None)
