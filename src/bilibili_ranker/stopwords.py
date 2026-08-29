@@ -37,7 +37,7 @@ def _read_word_file(path: Path | Traversable) -> set[str]:
 
 def default_resource_dir() -> Traversable:
     # 链式单参 joinpath：Traversable 协议（3.10 的 ABC）只定义单参签名，多参形式
-    # 在普通安装下因底层是 pathlib.Path 才碰巧可用，zip 导入等场景会炸。
+    # 在 zip 导入等场景会炸。
     return files("bilibili_ranker").joinpath("resources").joinpath("stopwords")
 
 
@@ -63,15 +63,13 @@ def load_stopword_policy(
     if isinstance(languages, str):
         raise TypeError("languages 必须是语言代码的可迭代对象，不能是字符串")
 
-    # 非字符串语言码是调用方的 bug（("zh", 123) 里的 123），静默丢掉会让停用词表少一门
-    # 语言而毫无提示。空串是分隔符残留（"zh,,en".split(",")），丢掉即可。
+    # 静默丢掉非字符串语言码会让停用词表少一门语言而无提示；空串是分隔符残留，丢掉即可。
     materialized = tuple(languages)
     invalid = [code for code in materialized if not isinstance(code, str)]
     if invalid:
         raise ValueError(f"languages 里有非字符串语言代码：{invalid}")
     language_codes = tuple(dict.fromkeys(code.strip() for code in materialized if code.strip()))
-    # 过滤后为空说明传进来的全是空串：iso_stopwords(()) 返回空集、unsupported 也为空，
-    # 于是基础停用词静默全失效，词云产出满屏虚词。宁可报错。
+    # 全是空串时基础停用词会静默全失效，词云产出满屏虚词。
     if not language_codes:
         raise ValueError("languages 里没有有效的语言代码")
     unsupported = [code for code in language_codes if not has_lang(code)]

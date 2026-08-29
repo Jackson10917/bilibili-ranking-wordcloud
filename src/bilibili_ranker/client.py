@@ -31,8 +31,7 @@ def _default_user_agent() -> str:
     return os.environ.get("BILIBILI_UA") or _DEFAULT_UA
 
 
-# socket.settimeout 对超大值会抛 OverflowError（1e9 起就 "doesn't fit into C timeval"），
-# 不是调用方能理解的错误。一天足够覆盖任何合理超时，超过就是参数写错了。
+# socket.settimeout 对 1e9 起的超大值抛 OverflowError；一天足以覆盖任何合理超时。
 MAX_TIMEOUT_SECONDS = 86_400.0
 
 _RISK_CONTROL_CODE = -352
@@ -114,13 +113,13 @@ def fetch_all_ranking(
     被风控拦截（业务码 -352，或只有 HTTP 412 没有 JSON 体）时刷新 buvid cookie 后重试。
     """
 
-    # 在公共 API 入口统一校验：CLI 之外的调用方直接传 -1/inf/1e10 时，底层会抛
-    # ValueError/OverflowError，与本模块其余错误（BilibiliAPIError）不是一类，调用方没法统一处理。
+    # 非法值在公共入口挡掉：底层抛的 ValueError/OverflowError 不在调用方可统一
+    # 处理的 BilibiliAPIError 之内。
     if not math.isfinite(timeout_seconds) or not 0 < timeout_seconds <= MAX_TIMEOUT_SECONDS:
         raise BilibiliAPIError(
             f"timeout_seconds 必须是 0 到 {MAX_TIMEOUT_SECONDS:.0f} 之间的有限数：{timeout_seconds!r}"
         )
-    # rid 与 timeout 同理在入口挡掉非法值；bool 是 int 的子类，True 会被 str() 成 "True"。
+    # bool 是 int 的子类，True 会被 str() 成 "True"。
     if isinstance(rid, bool) or not isinstance(rid, int) or rid < 0:
         raise BilibiliAPIError(f"rid 必须是不小于 0 的整数：{rid!r}")
 
@@ -130,14 +129,11 @@ def fetch_all_ranking(
     try:
         last_response: requests.Response | None = None
         for attempt in range(_RISK_CONTROL_ATTEMPTS):
-            # ChunkedEncodingError 是 body 在 get() 内部读完时被截断抛出的，urllib3 Retry
-            # 只管到响应到达为止、不覆盖这个阶段，所以在原轮次上限内重试、不叠乘；
-            # 最后一轮仍失败才交给外层包装成 BilibiliAPIError。
+            # ChunkedEncodingError 发生在响应体读取阶段，urllib3 Retry 不覆盖；
+            # 在原轮次上限内重试，最后一轮仍失败才交外层包装。
             try:
                 response = session.get(
                     RANKING_API_URL,
-                    # wire 上本就是字符串，requests 也只是把 int str() 一遍；int 写成
-                    # 字符串兼顾类型签名与 URL 稳定。
                     params={"rid": str(rid), "type": "all"},
                     headers={
                         "Accept": "application/json, text/plain, */*",
@@ -157,13 +153,11 @@ def fetch_all_ranking(
                 payload = None
             code = payload.get("code") if isinstance(payload, Mapping) else None
 
-            # 风控也可能只回 412 + HTML（无 JSON 业务码），此时同样要刷 buvid 重试。
-            # 但 412 带了业务码就按业务码判：代理/CDN 的 412 不该把真实错误码盖成"风控"。
-            # （412 + code=0 会被 raise_for_status 作为 HTTP 错误上报，至少保留了真实状态码。）
+            # 风控可能只回 412 + HTML（无 JSON 业务码），此时同样刷 buvid 重试；
+            # 带业务码就按业务码判，代理/CDN 的 412 不误报成风控。
             last_response = response
 
-            # 200 但拿不到有效 JSON：CDN 偶发返回截断/HTML 错误页或中途断连，
-            # 重试一次通常就好。只在 200 上重试，412 仍交给下面的风控分支处理。
+            # 200 但 JSON 无效：CDN 偶发错误页或截断，重试；412 交给下面的风控分支。
             if (
                 payload is None
                 and response.status_code == 200
@@ -181,7 +175,7 @@ def fetch_all_ranking(
                         user_agent=user_agent,
                         timeout_seconds=timeout_seconds,
                     )
-                    # 立刻二连会加重风控。首轮不等（冷启动必吃一次 -352），之后递增退避。
+                    # 冷启动首轮必吃一次 -352，不等；之后递增退避，避免立刻二连加重风控。
                     if attempt > 0:
                         time.sleep(_RISK_CONTROL_BACKOFF_SECONDS * attempt)
                 continue
@@ -205,7 +199,7 @@ def fetch_all_ranking(
                 raise BilibiliAPIError("排行榜响应包含非对象记录")
             return RankingFetchResult(fetched_at=fetched_at, items=tuple(items))
 
-        # 附上最后一轮的诊断信息：非风控 412（代理/CDN 错误页）至少留下可排查线索。
+        # 非风控 412（代理/CDN 错误页）也走到这里，带上最后响应便于排查。
         _diag = ""
         if last_response is not None:
             _body = last_response.text[:200].replace("\n", " ")

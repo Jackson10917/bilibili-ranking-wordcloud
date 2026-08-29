@@ -36,6 +36,13 @@ from .wordcloud import render_wordcloud
 _TIMESTAMPED_FREQUENCY_PATTERN = re.compile(r"word_frequency_\d{8}T\d{6}Z(?:-\d+)?\.csv")
 
 
+def _history_order(path: Path) -> tuple[str, int]:
+    # 同秒跳号后缀的 '-'（0x2D）排在 '.'（0x2E）之前，纯文件名排序会把 -2 排到无后缀之前，
+    # 「取最新一份」反取到较早那份；按（时间戳, 跳号）排才是时间序。
+    timestamp, _, number = path.stem.removeprefix("word_frequency_").partition("-")
+    return timestamp, int(number or 0)
+
+
 def _language_codes(value: str) -> tuple[str, ...]:
     codes = tuple(dict.fromkeys(part.strip() for part in value.split(",") if part.strip()))
     if not codes:
@@ -55,8 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--languages",
         type=_language_codes,
         default=DEFAULT_LANGUAGES,
-        # 默认值不经 type 转换，不能写成字符串（会触发 stopwords.py 的字符串防护）；
-        # 元组直接进 help 会显示成 ('zh', 'en', ...)，所以手写默认值文本。
+        # 默认值不经 type 转换：写字符串会触发 stopwords.py 的字符串防护；help 的默认值文本手写。
         help=f"逗号分隔的 stopwordsiso 语言代码（默认：{','.join(DEFAULT_LANGUAGES)}）",
     )
     parser.add_argument("--timeout", type=float, default=15.0, help="请求超时秒数")
@@ -90,40 +96,36 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
-    # 先加载停用词：不依赖网络，让 --languages/--resource-dir 的错误在发请求前就报出来，
-    # 而不是抓完整个榜单再抛异常、CSV 一个字节都不落盘。
+    # 停用词加载不依赖网络：参数错误在发请求前就报出来，不白抓一整榜。
     policy = load_stopword_policy(args.resource_dir, languages=args.languages)
 
-    # 显式配置的字体（--font-path 或环境变量）同理提前到任何写盘和请求之前：路径写错一个
-    # 字母不该等抓完整榜后被词云阶段的降级逻辑吞成警告、退出码还是 0。两处都没给时仍把
-    # 自动探测留给渲染期——那属于「环境缺中日韩字体」的可降级故障，不是用户输错参数。
+    # 显式字体（--font-path 或环境变量）同理在写盘和请求之前校验；两处都没给时把自动探测
+    # 留给渲染期——那是「环境缺中日韩字体」的可降级故障，不是用户输错参数。
     resolved_font: Path | None = None
     if args.font_path is not None or os.environ.get("BILIBILI_WORDCLOUD_FONT"):
         resolved_font = resolve_font_path(args.font_path)
 
-    # 内置热词表默认加载，--user-dict 是追加而非替代；两者都须在首次分词前完成。
-    # 显式 --user-dict 的文件校验排在 mkdir 之前：与 --languages/--font-path 一致，
-    # 参数写错不留下空目录。内置词典随包分发，不存在用户写错路径的问题。
+    # 内置热词表默认加载，--user-dict 追加；两者都须在首次分词前完成，
+    # 且显式词典的校验排在 mkdir 之前，参数写错不留空目录。
     load_default_dictionary()
     if args.user_dict is not None:
         load_user_dictionary(args.user_dict)
 
-    # 同理先探输出目录：CSV 先落盘的设计下，目录不可写会让抓完的整榜数据白抓一遍。
+    # 输出目录先探：CSV 先落盘的设计下，目录不可写会白抓一整榜。
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     fetched = fetch_all_ranking(timeout_seconds=args.timeout, rid=args.rid)
 
     bundle = create_output_bundle(args.output_dir, fetched.fetched_at)
 
-    # create_output_bundle 用 O_CREAT|O_EXCL 占位了一个 0 字节 CSV。这里到 write_records_csv
-    # 之间若抛异常（Ctrl+C、解析崩溃），占位文件会永久残留并占掉该编号，下次运行跳到 -2。
-    # 只在文件仍是 0 字节时清理，绝不碰已经写入内容的结果。
+    # create_output_bundle 已用 O_CREAT|O_EXCL 占位一个 0 字节 CSV；占位后抛异常
+    # （Ctrl+C、解析崩溃）会残留并占掉该编号。仅当文件仍是 0 字节才清理。
     try:
         records, parse_rejected_count = parse_ranking_records(fetched.items)
         accepted, duplicate_rejected_count = deduplicate_records(records)
 
-        # CSV 先落盘：分词（内部导入 jieba）抛任何异常都不该让已经抓完的榜单一个字节不留，
-        # 否则与「词云失败只降级警告、CSV 照常写出」的处理自相矛盾。
+        # 分词（内部导入 jieba）抛异常时已抓的榜单不能一个字节不留，
+        # 与「词云失败只降级警告、CSV 照常写出」的处理一致。
         write_records_csv(bundle.ranking_csv, accepted)
     except BaseException:
         try:
@@ -134,8 +136,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         raise
     rejected_count = parse_rejected_count + duplicate_rejected_count
 
-    # 接口成功但整榜无法解析（上游字段改名）时，退出码 0 会让定时任务把只有表头的 CSV
-    # 当成功结果。CSV 已经落盘，抛异常即可：main 会打印错误并返回 1。
+    # 整榜解析失败（上游字段改名）时退出码 0 会让定时任务把表头 CSV 当成功结果，抛掉。
     if not accepted:
         raise RuntimeError(
             f"没有解析出任何有效记录（抓取 {len(fetched.items)} 条，全部被拒绝），"
@@ -156,8 +157,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     else:
         print("警告：标题清洗后没有可用词元，只输出 CSV。", file=sys.stderr)
 
-    # 词云来源：默认本次词频；--aggregate 时换成跨运行累计，单次快照里九成词
-    # 只出现一次，字号编码的差异接近噪声。
+    # --aggregate 时词云改用跨运行累计：单次快照的词频接近噪声，字号编码不出有效信息。
     cloud_frequencies: Mapping[str, int] | None = None
     cloud_destination: Path | None = None
     aggregate_csv: Path | None = None
@@ -165,11 +165,14 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         aggregate_target = args.output_dir / AGGREGATE_FREQUENCY_CSV_NAME
         # 白名单只收时间戳形态（含 -2 跳号后缀）：聚合产物固定名与备份/改名产物都不匹配。
         history = sorted(
-            path
-            for path in args.output_dir.glob("word_frequency_*.csv")
-            if _TIMESTAMPED_FREQUENCY_PATTERN.fullmatch(path.name)
+            (
+                path
+                for path in args.output_dir.glob("word_frequency_*.csv")
+                if _TIMESTAMPED_FREQUENCY_PATTERN.fullmatch(path.name)
+            ),
+            key=_history_order,
         )
-        # 同一 UTC 日期只取最新一份（文件名排序即时间序）：一天多跑会把当天词频计两次。
+        # 同一 UTC 日期只取最新一份：一天多跑会把当天词频计两次。
         latest_per_date = {path.name[len("word_frequency_") :][:8]: path for path in history}
         merged = load_frequency_csvs(latest_per_date.values())
         if merged:
@@ -192,12 +195,11 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
                 height=args.height,
                 max_words=args.max_words,
             )
-        # 超大 --width/--height 会让 PIL 抛 MemoryError，不能以 traceback 收场。
+        # 超大 --width/--height 会让 PIL 抛 MemoryError。
         except (RuntimeError, ValueError, OSError, MemoryError) as exc:
             print(f"警告：词云生成失败，仅输出 CSV：{exc}", file=sys.stderr)
 
-    # 键名用 ASCII：摘要 JSON 的消费者是脚本（jq、CI），中文键名对下游不友好；
-    # 字段含义由 README 的字段表承载。
+    # 摘要的消费者是脚本（jq、CI），键名用 ASCII；字段含义由 README 的字段表承载。
     return {
         "fetched": len(fetched.items),
         "accepted": len(accepted),
@@ -210,9 +212,8 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    # 摘要 JSON 和警告都含中文。Windows 上重定向到管道/文件时 stdout 用的是 ANSI 代码页
-    # （西文机器是 cp1252），print 会以 UnicodeEncodeError 收场——活干完了却报错退出。
-    # Python 3.15 起 UTF-8 成为默认，届时这段是空操作。
+    # Windows 上重定向到管道/文件时 stdout 用 ANSI 代码页，中文摘要会以 UnicodeEncodeError
+    # 收场；Python 3.15 起 UTF-8 成为默认，届时这段是空操作。
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:

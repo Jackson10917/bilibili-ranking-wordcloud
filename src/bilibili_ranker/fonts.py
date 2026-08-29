@@ -60,8 +60,7 @@ def _standard_font_roots() -> Iterable[Path]:
 
 
 # sfnt 容器的魔数：TrueType(00 01 00 00 / true)、TrueType Collection(ttcf)、OpenType CFF(OTTO)。
-# 只看后缀的话，改名成 .ttf 的文本文件要拖到 PIL 才炸成 "cannot open resource"，
-# 用户根本判断不出是自己指定的字体损坏。
+# 只看后缀会放过改名成 .ttf 的文本文件，拖到渲染期才炸。
 _SFNT_MAGICS = (b"\x00\x01\x00\x00", b"true", b"ttcf", b"OTTO", b"typ1")
 
 
@@ -71,8 +70,7 @@ def _validate_font_file(path: str | Path, *, source: str) -> Path:
         raise FontNotFoundError(f"{source} 指定的字体不存在：{resolved}")
     if resolved.suffix.casefold() not in {".ttf", ".ttc", ".otf"}:
         raise FontNotFoundError(f"{source} 不是受支持的字体文件：{resolved}")
-    # 深度校验直接用 PIL 试载（见下方）：词云渲染走的就是 ImageFont.truetype 这条路，
-    # 能过校验就一定能渲染，不引入 fontTools 这类新依赖。
+    # 深度校验用 PIL 试载：与渲染走同一条 ImageFont.truetype 路径，能过校验就一定能渲染。
     try:
         with resolved.open("rb") as stream:
             header = stream.read(4)
@@ -80,7 +78,7 @@ def _validate_font_file(path: str | Path, *, source: str) -> Path:
         raise FontNotFoundError(f"{source} 指定的字体无法读取：{resolved}（{exc}）") from exc
     if header not in _SFNT_MAGICS:
         raise FontNotFoundError(f"{source} 指定的字体文件已损坏或不是字体：{resolved}")
-    # 魔数对但字形表损坏的文件在这里拦截，错误信息带字体路径，不拖到渲染期报英文错误。
+    # 魔数对但字形表损坏的文件在这里拦截，错误信息带字体路径。
     try:
         from PIL import ImageFont
 

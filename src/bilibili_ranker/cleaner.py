@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+import warnings
 from collections import Counter
 from collections.abc import Iterable
 from importlib.resources import as_file, files
@@ -58,6 +59,11 @@ def _has_out_of_dict_char(chunk: str) -> bool:
     # dt.FREQ 是私有 API（依赖钉 jieba<1）；上游改结构时放弃信号、退回不补整块。
     freq: object = getattr(getattr(_jieba, "dt", None), "FREQ", None)
     if not isinstance(freq, dict):
+        # 默认 warning 过滤按（消息, 行号）去重，反复调用只警告一次。
+        warnings.warn(
+            "读取 jieba.dt.FREQ 失败（jieba 版本过新？），日文汉字词不再整块保留",
+            stacklevel=2,
+        )
         return False
     return any(freq.get(character, 0) == 0 for character in chunk)
 

@@ -448,8 +448,13 @@ def test_cli_aggregate_deduplicates_same_utc_date() -> None:
 
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
+        # 同秒跳号变体：'-'（0x2D）排在 '.'（0x2E）之前，纯文件名排序会把 -2 排到
+        # 无后缀之前，「取最新」反取到较早那份。
         (root / "word_frequency_20231231T120000Z.csv").write_text(
             "词,词频\n教程,5\n", encoding="utf-8-sig"
+        )
+        (root / "word_frequency_20231231T120000Z-2.csv").write_text(
+            "词,词频\n教程,9\n", encoding="utf-8-sig"
         )
         (root / "word_frequency_20240101T090000Z.csv").write_text(
             "词,词频\n魔方,2\n", encoding="utf-8-sig"
@@ -467,8 +472,8 @@ def test_cli_aggregate_deduplicates_same_utc_date() -> None:
         with (root / AGGREGATE_FREQUENCY_CSV_NAME).open(encoding="utf-8-sig", newline="") as stream:
             counts = {row["词"]: row["词频"] for row in csv.DictReader(stream)}
         # 本次（15:00）是 20240101 当天最新，09:00/12:00 两份同日快照都被它取代；
-        # 前一天（20231231）的照常并入。未去重时魔方会是 3、模型会出现。
-        assert counts == {"教程": "6", "魔方": "1"}
+        # 前一天（20231231）取同秒的 -2 变体（9 而非 5）。未去重时魔方会是 3、模型会出现。
+        assert counts == {"教程": "10", "魔方": "1"}
 
 
 def test_cli_user_dict_missing_file_fails_before_network() -> None:

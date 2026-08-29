@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from bilibili_ranker.cleaner import TitleAnalyzer, deduplicate_records
 from bilibili_ranker.models import VideoRankingRecord, parse_ranking_records
 from bilibili_ranker.stopwords import load_stopword_policy
@@ -279,6 +281,18 @@ def test_single_char_fallback_requires_out_of_dict_char() -> None:
     single = TitleAnalyzer(load_stopword_policy(), minimum_token_length=1)
     record = VideoRankingRecord.from_api_item({"bvid": "BV1aa0000000", "title": "猫和狗"}, rank=1)
     assert single.analyze([record]) == {"猫": 1, "狗": 1}
+
+
+def test_missing_jieba_freq_warns_and_drops_signal(monkeypatch: pytest.MonkeyPatch) -> None:
+    # dt.FREQ 是私有 API：上游改结构时降级必须可察觉（警告），否则日文汉字词
+    # 会被 min-length 静默丢干净，词云少一门语言而无人知道。
+    import jieba
+
+    from bilibili_ranker.cleaner import _has_out_of_dict_char
+
+    monkeypatch.setattr(jieba.dt, "FREQ", None)
+    with pytest.warns(UserWarning, match="jieba.dt.FREQ"):
+        assert _has_out_of_dict_char("転生") is False
 
 
 def test_email_and_filename_noise_stripped() -> None:
