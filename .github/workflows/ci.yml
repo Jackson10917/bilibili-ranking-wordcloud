@@ -1,7 +1,7 @@
 name: CI
 
 on:
-  # push 只收 main：否则同仓库 PR 会同时触发 push 和 pull_request，16 个 job 白跑两遍。
+  # push 只收 main：否则同仓库 PR 会同时触发 push 和 pull_request，7 个 job 白跑两遍。
   # concurrency 拦不住这种重复——两类事件的 github.ref 不同（refs/heads/x vs
   # refs/pull/N/merge），group 不同就不会互相取消。
   push:
@@ -22,9 +22,19 @@ permissions:
 jobs:
   test:
     strategy:
+      # 矩阵只保留有信号的组合：版本差异集中在两端，ubuntu 跑最低 3.10 与最新 3.14
+      # 两个端点；3.10 再配一次 Windows（importlib.abc 兜底路径 × 平台差异）、
+      # 3.14 配一次 macOS（字体目录探测的平台分支）。中间版本不新增有效信息。
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.10"
+          - os: ubuntu-latest
+            python-version: "3.14"
+          - os: windows-latest
+            python-version: "3.10"
+          - os: macos-latest
+            python-version: "3.14"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

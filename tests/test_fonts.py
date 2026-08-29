@@ -169,49 +169,49 @@ def test_font_not_found_when_system_has_none() -> None:
                 raise AssertionError("无字体环境未抛出 FontNotFoundError")
 
 
-def test_font_discovered_via_recursive_scan() -> None:
-    # 直链候选不存在时靠 rglob 递归探测嵌套子目录（Debian 的 fonts-noto-cjk 就装在
-    # opentype/noto 这类子目录里）。两条排序规则都要成立：同名字体取路径排序最小的
-    # （保证跨机器可复现）；候选名单顺序压过文件系统扫描顺序。
+def test_font_discovered_by_direct_filename() -> None:
+    # 顶层直查按候选名单顺序返回：NotoSansCJKsc 在名单里排在 msyh 之前，两者同时存在时
+    # 必须返回 Noto。目录顶层没有的字体不再递归找（嵌套安装交给 fontconfig），直接落空时
+    # 抛带指引的 FontNotFoundError 而不是崩溃。
     import os
     from unittest.mock import patch
 
     from bilibili_ranker import fonts as fonts_module
+    from bilibili_ranker.fonts import FontNotFoundError, resolve_font_path
 
     old = os.environ.get("BILIBILI_WORDCLOUD_FONT")
     try:
         os.environ.pop("BILIBILI_WORDCLOUD_FONT", None)
 
-        # 同名候选出现在两个深度，按路径排序应取 b/ 下那份而非 c/deep/ 下那份。
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            same_named = root / "b" / "NotoSansSC-Regular.otf"
-            same_named.parent.mkdir()
-            same_named.write_bytes(b"\x00\x01\x00\x00")
-            (root / "c" / "deep").mkdir(parents=True)
-            (root / "c" / "deep" / "NotoSansSC-Regular.otf").write_bytes(b"\x00\x01\x00\x00")
+            noto = root / "NotoSansCJKsc-Regular.otf"
+            noto.write_bytes(b"\x00\x01\x00\x00")
+            (root / "msyh.ttc").write_bytes(b"ttcf")
 
             with (
                 patch.object(fonts_module, "_standard_font_roots", lambda: iter((root,))),
                 patch.object(fonts_module.shutil, "which", lambda _: None),
             ):
-                assert fonts_module.resolve_font_path(None) == same_named.resolve()
+                assert resolve_font_path(None) == noto.resolve()
 
-        # STHeiti 在目录 a/ 下会先被扫到，但名单里 simsun 排在它前面，应返回 simsun：
-        # 候选名单顺序必须压过文件系统扫描顺序。
+        # 只有嵌套在子目录里的候选：顶层直查不命中，fontconfig 也没有 → 可降级失败。
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "a").mkdir()
-            (root / "a" / "STHeiti Medium.ttc").write_bytes(b"ttcf")
-            expected = root / "z" / "simsun.ttc"
-            expected.parent.mkdir()
-            expected.write_bytes(b"\x00\x01\x00\x00")
+            nested = root / "opentype" / "noto" / "NotoSansCJK-Regular.ttc"
+            nested.parent.mkdir(parents=True)
+            nested.write_bytes(b"ttcf")
 
             with (
                 patch.object(fonts_module, "_standard_font_roots", lambda: iter((root,))),
                 patch.object(fonts_module.shutil, "which", lambda _: None),
             ):
-                assert fonts_module.resolve_font_path(None) == expected.resolve()
+                try:
+                    resolve_font_path(None)
+                except FontNotFoundError as exc:
+                    assert "--font-path" in str(exc)
+                else:
+                    raise AssertionError("嵌套字体不应被顶层直查发现")
     finally:
         if old is not None:
             os.environ["BILIBILI_WORDCLOUD_FONT"] = old

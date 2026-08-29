@@ -108,6 +108,8 @@ python -m bilibili_ranker --output-dir output
                                直接报错退出
 --aggregate                    合并输出目录已有词频 CSV，输出累计词频 CSV 与按累计
                                词频渲染的词云（替代本次时间戳词云）
+--no-fetch                     不请求排行榜，只做 --aggregate 的离线聚合与重渲染
+                               （需与 --aggregate 连用，单独使用按参数错误退出）
 --width 1920                   词云图宽度
 --height 1080                  词云图高度
 --max-words 300                词云图最大词数
@@ -158,6 +160,8 @@ output/
 
 聚合产物自身会从合并范围中排除，连续运行不会重复累计。聚合以输出目录为单位：不同分区（`--rid`）请使用不同的 `--output-dir`，同一个目录混用多个 rid 会把分区混在一起累计。
 
+加 `--no-fetch` 时本次不请求接口、不写时间戳产物，只对目录里已有的词频 CSV 重新聚合并重渲染累计词云——换字体、调尺寸、重出图不再要求联网再抓一次榜；输出目录还没有任何词频 CSV 时只警告不报错。此时摘要里 `fetched`/`accepted`/`rejected` 为 0，`ranking_csv`/`frequency_csv` 为 `null`。
+
 若接口返回成功但整榜记录全部无法解析（例如上游字段变更），退出码为 1，同时仍写出只含表头的 CSV 便于排查——自动化任务不会把这种情况误判为成功。
 
 ### 退出码
@@ -166,7 +170,7 @@ output/
 | --- | --- |
 | 0 | 成功（含「只输出 CSV」的降级情况） |
 | 1 | 运行期失败：网络/风控、整榜解析失败、语言代码不被支持、`--resource-dir` 缺文件、显式指定的字体（`--font-path`/环境变量）不可用、`--user-dict` 文件不可读 |
-| 2 | argparse 参数格式错误：未知参数、类型不符、`--timeout`/`--width`/`--height`/`--max-words`/`--minimum-token-length`/`--rid` 取值越界 |
+| 2 | argparse 参数格式错误：未知参数、类型不符、`--timeout`/`--width`/`--height`/`--max-words`/`--minimum-token-length`/`--rid` 取值越界、`--no-fetch` 未与 `--aggregate` 连用 |
 | 130 | Ctrl+C 中断 |
 
 注意 `--languages zh,xx`、`--resource-dir` 缺文件与显式指定的字体不可用，同属「值有效但资源不可用」，在流程内报错，退出码是 1 而非 2。显式指定的字体在发起抓取之前就完成校验，失败时不会写任何文件。
@@ -222,7 +226,7 @@ Emoji、标点及其他符号不参与词频统计。标题中只有 Emoji 或�
 3. 系统中的 Noto Sans CJK、思源黑体、微软雅黑、黑体、苹方或文泉驿字体；
 4. Linux `fontconfig` 返回的字体。
 
-Linux 推荐安装 Noto Sans CJK。仓库不包含专有字体文件。显式指定的字体（`--font-path` 或 `BILIBILI_WORDCLOUD_FONT`）会校验后缀与 sfnt 容器魔数，并用 PIL 试载做深度校验；校验在抓取开始前完成，路径错误或内容损坏直接退出码 1，不会先抓完榜单再降级。自动探测失败则按可降级的环境问题处理：只输出 CSV 并给出警告。自动查找只确认候选字体文件存在，不检查完整字形覆盖，若词云出现缺字，请使用 `--font-path` 指定包含所需字符的字体。
+Linux 推荐安装 Noto Sans CJK。仓库不包含专有字体文件。显式指定的字体（`--font-path` 或 `BILIBILI_WORDCLOUD_FONT`）会校验后缀与 sfnt 容器魔数，并用 PIL 试载做深度校验；校验在抓取开始前完成，路径错误或内容损坏直接退出码 1，不会先抓完榜单再降级。自动探测失败则按可降级的环境问题处理：只输出 CSV 并给出警告。自动查找只按候选文件名在标准字体目录顶层命中，不递归子目录（家目录可能是网络盘）；嵌套安装的字体（如 Debian 系 `fonts-noto-cjk` 装在 `opentype/noto/` 下）由 fontconfig 兜底，没有 fontconfig 的环境请改用 `--font-path`。自动查找只确认候选字体文件存在，不检查完整字形覆盖，若词云出现缺字，请使用 `--font-path` 指定包含所需字符的字体。
 
 `.ttc` 是字体集合容器，内部按语言分多个 face。`wordcloud` 调用 PIL 时不传 `index`，恒取 face 0——`NotoSansCJK-Regular.ttc` 的 face 0 是日文，简体汉字会以日文字形变体渲染（如「直」「骨」的写法差异），不是缺字。候选列表已把单体 `NotoSansCJKsc-Regular.otf` 排在 `.ttc` 之前；Debian 系的 `fonts-noto-cjk` 只提供 `.ttc`，若在意字形，用 `--font-path` 指定单体 SC 字体（`NotoSansSC-Regular.otf` 等）。
 

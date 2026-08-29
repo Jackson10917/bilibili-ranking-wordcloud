@@ -43,6 +43,21 @@ def _history_order(path: Path) -> tuple[str, int]:
     return timestamp, int(number or 0)
 
 
+def _merged_history(output_dir: Path) -> dict[str, int]:
+    # 白名单只收时间戳形态（含 -2 跳号后缀）：聚合产物固定名与备份/改名产物都不匹配。
+    history = sorted(
+        (
+            path
+            for path in output_dir.glob("word_frequency_*.csv")
+            if _TIMESTAMPED_FREQUENCY_PATTERN.fullmatch(path.name)
+        ),
+        key=_history_order,
+    )
+    # 同一 UTC 日期只取最新一份：一天多跑会把当天词频计两次。
+    latest_per_date = {path.name[len("word_frequency_") :][:8]: path for path in history}
+    return load_frequency_csvs(latest_per_date.values())
+
+
 def _language_codes(value: str) -> tuple[str, ...]:
     codes = tuple(dict.fromkeys(part.strip() for part in value.split(",") if part.strip()))
     if not codes:
@@ -92,6 +107,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="合并输出目录已有词频 CSV，输出累计词频 CSV 与按累计词频渲染的词云"
         "（替代本次时间戳词云）",
     )
+    parser.add_argument(
+        "--no-fetch",
+        action="store_true",
+        help="不请求排行榜，只做 --aggregate 的离线聚合与重渲染（需与 --aggregate 连用）",
+    )
     return parser
 
 
@@ -114,76 +134,78 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     # 输出目录先探：CSV 先落盘的设计下，目录不可写会白抓一整榜。
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    fetched = fetch_all_ranking(timeout_seconds=args.timeout, rid=args.rid)
+    # 输出目录先探：CSV 先落盘的设计下，目录不可写会白抓一整榜。
+    args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    bundle = create_output_bundle(args.output_dir, fetched.fetched_at)
-
-    # create_output_bundle 已用 O_CREAT|O_EXCL 占位一个 0 字节 CSV；占位后抛异常
-    # （Ctrl+C、解析崩溃）会残留并占掉该编号。仅当文件仍是 0 字节才清理。
-    try:
-        records, parse_rejected_count = parse_ranking_records(fetched.items)
-        accepted, duplicate_rejected_count = deduplicate_records(records)
-
-        # 分词（内部导入 jieba）抛异常时已抓的榜单不能一个字节不留，
-        # 与「词云失败只降级警告、CSV 照常写出」的处理一致。
-        write_records_csv(bundle.ranking_csv, accepted)
-    except BaseException:
-        try:
-            if bundle.ranking_csv.stat().st_size == 0:
-                bundle.ranking_csv.unlink()
-        except OSError:
-            pass
-        raise
-    rejected_count = parse_rejected_count + duplicate_rejected_count
-
-    # 整榜解析失败（上游字段改名）时退出码 0 会让定时任务把表头 CSV 当成功结果，抛掉。
-    if not accepted:
-        raise RuntimeError(
-            f"没有解析出任何有效记录（抓取 {len(fetched.items)} 条，全部被拒绝），"
-            f"CSV 只有表头：{bundle.ranking_csv}"
-        )
-
-    analyzer = TitleAnalyzer(
-        policy,
-        minimum_token_length=args.minimum_token_length,
-    )
-    frequencies = analyzer.analyze(accepted)
-
-    generated_wordcloud: Path | None = None
+    fetched_count = 0
+    accepted_count = 0
+    rejected_count = 0
+    ranking_csv: Path | None = None
     frequency_csv: Path | None = None
-    if frequencies:
-        # 词频表先于渲染落盘：渲染降级成仅警告时，机器可读的产物仍然在。
-        frequency_csv = write_frequencies_csv(bundle.word_frequency_csv, frequencies)
-    else:
-        print("警告：标题清洗后没有可用词元，只输出 CSV。", file=sys.stderr)
-
-    # --aggregate 时词云改用跨运行累计：单次快照的词频接近噪声，字号编码不出有效信息。
+    aggregate_csv: Path | None = None
+    generated_wordcloud: Path | None = None
     cloud_frequencies: Mapping[str, int] | None = None
     cloud_destination: Path | None = None
-    aggregate_csv: Path | None = None
+
+    if not args.no_fetch:
+        fetched = fetch_all_ranking(timeout_seconds=args.timeout, rid=args.rid)
+        fetched_count = len(fetched.items)
+
+        bundle = create_output_bundle(args.output_dir, fetched.fetched_at)
+        ranking_csv = bundle.ranking_csv
+
+        # create_output_bundle 已用 O_CREAT|O_EXCL 占位一个 0 字节 CSV；占位后抛异常
+        # （Ctrl+C、解析崩溃）会残留并占掉该编号。仅当文件仍是 0 字节才清理。
+        try:
+            records, parse_rejected_count = parse_ranking_records(fetched.items)
+            accepted, duplicate_rejected_count = deduplicate_records(records)
+
+            # 分词（内部导入 jieba）抛异常时已抓的榜单不能一个字节不留，
+            # 与「词云失败只降级警告、CSV 照常写出」的处理一致。
+            write_records_csv(bundle.ranking_csv, accepted)
+        except BaseException:
+            try:
+                if bundle.ranking_csv.stat().st_size == 0:
+                    bundle.ranking_csv.unlink()
+            except OSError:
+                pass
+            raise
+        rejected_count = parse_rejected_count + duplicate_rejected_count
+
+        # 整榜解析失败（上游字段改名）时退出码 0 会让定时任务把表头 CSV 当成功结果，抛掉。
+        if not accepted:
+            raise RuntimeError(
+                f"没有解析出任何有效记录（抓取 {len(fetched.items)} 条，全部被拒绝），"
+                f"CSV 只有表头：{bundle.ranking_csv}"
+            )
+        accepted_count = len(accepted)
+
+        frequencies = TitleAnalyzer(
+            policy,
+            minimum_token_length=args.minimum_token_length,
+        ).analyze(accepted)
+
+        if frequencies:
+            # 词频表先于渲染落盘：渲染降级成仅警告时，机器可读的产物仍然在。
+            frequency_csv = write_frequencies_csv(bundle.word_frequency_csv, frequencies)
+        else:
+            print("警告：标题清洗后没有可用词元，只输出 CSV。", file=sys.stderr)
+
+        # --aggregate 时词云改用跨运行累计：单次快照的词频接近噪声，字号编码不出有效信息。
+        if not args.aggregate:
+            cloud_frequencies = frequencies or None
+            cloud_destination = bundle.wordcloud_png
+
     if args.aggregate:
-        aggregate_target = args.output_dir / AGGREGATE_FREQUENCY_CSV_NAME
-        # 白名单只收时间戳形态（含 -2 跳号后缀）：聚合产物固定名与备份/改名产物都不匹配。
-        history = sorted(
-            (
-                path
-                for path in args.output_dir.glob("word_frequency_*.csv")
-                if _TIMESTAMPED_FREQUENCY_PATTERN.fullmatch(path.name)
-            ),
-            key=_history_order,
-        )
-        # 同一 UTC 日期只取最新一份：一天多跑会把当天词频计两次。
-        latest_per_date = {path.name[len("word_frequency_") :][:8]: path for path in history}
-        merged = load_frequency_csvs(latest_per_date.values())
+        merged = _merged_history(args.output_dir)
         if merged:
-            aggregate_csv = write_frequencies_csv(aggregate_target, merged)
+            aggregate_csv = write_frequencies_csv(
+                args.output_dir / AGGREGATE_FREQUENCY_CSV_NAME, merged
+            )
             cloud_frequencies = merged
             cloud_destination = args.output_dir / AGGREGATE_WORDCLOUD_PNG_NAME
         else:
             print("警告：输出目录没有可聚合的词频 CSV。", file=sys.stderr)
-    elif frequencies:
-        cloud_frequencies = frequencies
-        cloud_destination = bundle.wordcloud_png
 
     if cloud_frequencies is not None and cloud_destination is not None:
         try:
@@ -200,11 +222,12 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             print(f"警告：词云生成失败，仅输出 CSV：{exc}", file=sys.stderr)
 
     # 摘要的消费者是脚本（jq、CI），键名用 ASCII；字段含义由 README 的字段表承载。
+    # --no-fetch 时 fetched/accepted/rejected 为 0，ranking_csv/frequency_csv 为 null。
     return {
-        "fetched": len(fetched.items),
-        "accepted": len(accepted),
+        "fetched": fetched_count,
+        "accepted": accepted_count,
         "rejected": rejected_count,
-        "ranking_csv": str(bundle.ranking_csv.resolve()),
+        "ranking_csv": str(ranking_csv.resolve()) if ranking_csv else None,
         "frequency_csv": str(frequency_csv.resolve()) if frequency_csv else None,
         "aggregate_frequency_csv": str(aggregate_csv.resolve()) if aggregate_csv else None,
         "wordcloud": str(generated_wordcloud) if generated_wordcloud else None,
@@ -230,6 +253,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--minimum-token-length 必须大于 0")
     if args.rid < 0:
         parser.error("--rid 必须不小于 0")
+    if args.no_fetch and not args.aggregate:
+        parser.error("--no-fetch 需要与 --aggregate 一起使用")
 
     try:
         summary = run_pipeline(args)
