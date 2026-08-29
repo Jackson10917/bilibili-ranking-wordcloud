@@ -178,9 +178,14 @@ def load_frequency_csvs(paths: Iterable[Path]) -> dict[str, int]:
                     if not word:
                         continue
                     try:
-                        merged[word] += int(row.get("词频") or "")
+                        count = int(row.get("词频") or "")
                     except ValueError:
                         continue
+                    # 自家产物的词频恒 >= 1；手改或损坏的文件里出现 0/负数时，wordcloud
+                    # 会照常渲染出一张看似正常的图，错误无法察觉，所以直接跳过该行。
+                    if count < 1:
+                        continue
+                    merged[word] += count
         # UnicodeDecodeError（历史 CSV 被 Excel 另存成 ANSI 编码）和 csv.Error
         # （超长字段）都不是 OSError 子类，漏掉任何一个都会炸掉整个聚合。
         except (OSError, UnicodeDecodeError, csv.Error):

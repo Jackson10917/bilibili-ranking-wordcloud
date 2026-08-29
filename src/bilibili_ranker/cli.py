@@ -96,12 +96,13 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     if args.font_path is not None or os.environ.get("BILIBILI_WORDCLOUD_FONT"):
         resolved_font = resolve_font_path(args.font_path)
 
-    # 同理先探输出目录：CSV 先落盘的设计下，目录不可写会让抓完的整榜数据白抓一遍。
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-
     # 用户词典在首次分词前加载；文件不存在时 jieba 抛 OSError，同样不用等抓完整榜才报。
+    # 排在 mkdir 之前：与 --languages/--font-path 一致，参数写错不留下空目录。
     if args.user_dict is not None:
         load_user_dictionary(args.user_dict)
+
+    # 同理先探输出目录：CSV 先落盘的设计下，目录不可写会让抓完的整榜数据白抓一遍。
+    args.output_dir.mkdir(parents=True, exist_ok=True)
 
     fetched = fetch_all_ranking(timeout_seconds=args.timeout, rid=args.rid)
 

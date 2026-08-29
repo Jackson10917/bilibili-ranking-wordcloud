@@ -446,3 +446,18 @@ def test_cli_user_dict_missing_file_fails_before_network() -> None:
         missing = Path(directory) / "nope.txt"
         with patch.object(cli_module, "fetch_all_ranking", lambda **_: 1 / 0):
             assert main(["--output-dir", directory, "--user-dict", str(missing)]) == 1
+
+
+def test_cli_user_dict_missing_file_leaves_no_output_dir() -> None:
+    # 与 --languages/--font-path 一致：参数写错不能留下空输出目录，所以词典加载
+    # 必须排在 mkdir 之前。
+    from unittest.mock import patch
+
+    import bilibili_ranker.cli as cli_module
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory) / "out"
+        missing = Path(directory) / "nope.txt"
+        with patch.object(cli_module, "fetch_all_ranking", lambda **_: 1 / 0):
+            assert main(["--output-dir", str(root), "--user-dict", str(missing)]) == 1
+        assert not root.exists()
