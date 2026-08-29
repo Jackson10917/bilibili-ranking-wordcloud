@@ -573,3 +573,30 @@ def test_cli_user_dict_missing_file_leaves_no_output_dir() -> None:
         with patch.object(cli_module, "fetch_all_ranking", lambda **_: 1 / 0):
             assert main(["--output-dir", str(root), "--user-dict", str(missing)]) == 1
         assert not root.exists()
+
+
+def test_cli_no_fetch_skips_tokenizer_setup() -> None:
+    # --no-fetch 不构造 TitleAnalyzer：停用词策略与 jieba 词典是分词路径的开销
+    # （词典构建约一秒），离线聚合重渲染不该白付。两者打桩成 AssertionError，
+    # 离线路径若误触加载，测试会当场炸出。
+    from unittest.mock import patch
+
+    import bilibili_ranker.cli as cli_module
+    from bilibili_ranker.storage import AGGREGATE_FREQUENCY_CSV_NAME
+
+    def boom(*_: object, **__: object) -> object:
+        raise AssertionError("--no-fetch 不应该加载分词资源")
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory) / "out"
+        root.mkdir()
+        (root / "word_frequency_20240101T000000Z.csv").write_text(
+            "词,词频\n魔方,2\n", encoding="utf-8-sig"
+        )
+        with (
+            patch.object(cli_module, "load_stopword_policy", boom),
+            patch.object(cli_module, "load_default_dictionary", boom),
+            patch.object(cli_module, "render_wordcloud", lambda *args, **__: Path(str(args[1]))),
+        ):
+            assert main(["--output-dir", str(root), "--aggregate", "--no-fetch"]) == 0
+        assert (root / AGGREGATE_FREQUENCY_CSV_NAME).exists()

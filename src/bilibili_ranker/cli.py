@@ -116,24 +116,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
-    # 停用词加载不依赖网络：参数错误在发请求前就报出来，不白抓一整榜。
-    policy = load_stopword_policy(args.resource_dir, languages=args.languages)
-
     # 显式字体（--font-path 或环境变量）在此校验：无效字体是参数错误而非可降级故障，
     # 抓不抓榜都应在动任何输出之前报出来；两处都没给时把自动探测留给渲染期——
     # 那是「环境缺中日韩字体」的可降级故障，不是用户输错参数。
     resolved_font: Path | None = None
     if args.font_path is not None or os.environ.get("BILIBILI_WORDCLOUD_FONT"):
         resolved_font = resolve_font_path(args.font_path)
-
-    # 内置热词表默认加载，--user-dict 追加；两者都须在首次分词前完成，
-    # 且显式词典的校验排在 mkdir 之前，参数写错不留空目录。
-    load_default_dictionary()
-    if args.user_dict is not None:
-        load_user_dictionary(args.user_dict)
-
-    # 输出目录先探：CSV 先落盘的设计下，目录不可写会白抓一整榜。
-    args.output_dir.mkdir(parents=True, exist_ok=True)
 
     fetched_count = 0
     accepted_count = 0
@@ -146,6 +134,17 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     cloud_destination: Path | None = None
 
     if not args.no_fetch:
+        # 停用词与 jieba 词典只有分词路径需要：--no-fetch 不构造 TitleAnalyzer，
+        # 提前加载只会白付词典构建的时间。校验仍全部排在抓取与 mkdir 之前——
+        # 参数错误在发请求前报出来，不白抓一整榜；词典写错不留空目录。
+        policy = load_stopword_policy(args.resource_dir, languages=args.languages)
+        load_default_dictionary()
+        if args.user_dict is not None:
+            load_user_dictionary(args.user_dict)
+
+        # 输出目录先探：CSV 先落盘的设计下，目录不可写会白抓一整榜。
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+
         fetched = fetch_all_ranking(timeout_seconds=args.timeout, rid=args.rid)
         fetched_count = len(fetched.items)
 
