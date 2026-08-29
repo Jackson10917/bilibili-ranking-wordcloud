@@ -35,12 +35,10 @@ def create_output_bundle(root: str | Path, fetched_at: datetime) -> OutputBundle
     ranking_csv = base / f"ranking_{label}.csv"
     wordcloud_png = base / f"wordcloud_{label}.png"
     word_frequency_csv = base / f"word_frequency_{label}.csv"
-    # 同一秒内多次运行会重名，追加 -2/-3 后缀。用 O_CREAT|O_EXCL 原子占位 CSV 而不是
-    # exists()：后者在"检查"和"写入"之间有窗口，同秒并发的两个进程会拿到同一编号，
-    # 后写者的 os.replace 直接覆盖先写者的结果。PNG 只做存在性检查，跟随 CSV 的编号
-    # （编号由占位成败唯一确定，因此并发进程不会撞 PNG），避免词云不生成时留下空文件。
-    # 词频 CSV 同样只查存在性：--aggregate 靠攒词频 CSV 做累计，ranking CSV 常被清掉
-    # 只留词频，不查的话同秒重跑会把它 os.replace 覆盖掉，累计历史静默少一天。
+    # 同一秒多次运行重名，追加 -2/-3。用 O_CREAT|O_EXCL 原子占位而不是 exists()：
+    # 并发进程会在检查与写入之间撞到同一编号，后写者覆盖先写者。PNG 与词频 CSV 只查
+    # 存在性（编号由占位成败唯一确定）；词频 CSV 是 --aggregate 的累计输入，同秒重跑
+    # 覆盖它会静默丢一天历史。
     counter = 2
     while True:
         try:
@@ -86,9 +84,8 @@ def _atomic_csv_write(
     return destination
 
 
-# Excel/LibreOffice 会把以这些字符开头的单元格当公式求值（CSV 注入）。
-# Tab 和 CR 也在列：Excel 会先剥掉它们，露出后面的 = 继续当公式。
-# 所有来自 API 响应的字符串字段统一转义，不区分"官方枚举"与"用户可控"。
+# Excel/LibreOffice 把这些前缀开头的单元格当公式求值（CSV 注入）；Tab 和 CR 会被先剥掉、
+# 露出后面的 = 继续当公式。
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 RANKING_CSV_HEADERS = (
@@ -146,8 +143,7 @@ def write_records_csv(destination: Path, records: Iterable[VideoRankingRecord]) 
     )
 
 
-# 词频表是机器可读产物：PNG 只适合人眼，趋势与对比分析需要精确计数。词来自投稿
-# 标题（用户可控），与榜单 CSV 走同一套公式前缀转义。行序沿用传入字典的降序。
+# 词来自投稿标题（用户可控），与榜单 CSV 走同一套公式前缀转义。行序沿用传入字典的降序。
 FREQUENCY_CSV_HEADERS = ("词", "词频")
 
 
@@ -156,8 +152,7 @@ def write_frequencies_csv(destination: Path, frequencies: Mapping[str, int]) -> 
     return _atomic_csv_write(destination, FREQUENCY_CSV_HEADERS, rows)
 
 
-# 跨运行聚合产物用固定名、每次原子覆盖：它是滚动累计快照，不是逐日归档；
-# 逐日数据就是目录里那些带时间戳的词频 CSV 本身。
+# 固定名滚动累计快照，每次原子覆盖；逐日数据就是目录里带时间戳的词频 CSV 本身。
 AGGREGATE_FREQUENCY_CSV_NAME = "word_frequency_aggregate.csv"
 AGGREGATE_WORDCLOUD_PNG_NAME = "wordcloud_aggregate.png"
 
@@ -181,13 +176,12 @@ def load_frequency_csvs(paths: Iterable[Path]) -> dict[str, int]:
                         count = int(row.get("词频") or "")
                     except ValueError:
                         continue
-                    # 自家产物的词频恒 >= 1；手改或损坏的文件里出现 0/负数时，wordcloud
-                    # 会照常渲染出一张看似正常的图，错误无法察觉，所以直接跳过该行。
+                    # 0/负词频来自损坏或手改的文件：照常渲染会产出看似正常的图，错误无法察觉。
                     if count < 1:
                         continue
                     merged[word] += count
-        # UnicodeDecodeError（历史 CSV 被 Excel 另存成 ANSI 编码）和 csv.Error
-        # （超长字段）都不是 OSError 子类，漏掉任何一个都会炸掉整个聚合。
+        # UnicodeDecodeError（历史 CSV 被 Excel 另存成 ANSI）和 csv.Error（超长字段）
+        # 都不是 OSError 子类。
         except (OSError, UnicodeDecodeError, csv.Error):
             continue
     return dict(merged.most_common())
