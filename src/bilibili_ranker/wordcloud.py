@@ -29,7 +29,9 @@ def render_wordcloud(
     except ImportError as exc:
         raise RuntimeError("缺少 wordcloud，请先安装项目依赖") from exc
 
-    resolved_font = resolve_font_path(font_path)
+    # 传入的 font_path 视为已校验（CLI 在抓取前已完成深度校验），不再重复读魔数和
+    # PIL 试载；只有未指定时才在此自动探测——缺字体是可降级的环境故障，不是参数错误。
+    resolved_font = Path(font_path) if font_path is not None else resolve_font_path()
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
 

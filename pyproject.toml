@@ -58,6 +58,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 bilibili_ranker = [
+  "py.typed",
   "resources/stopwords/*.txt",
   "resources/stopwords/*.md",
   "resources/dict/*.txt",
