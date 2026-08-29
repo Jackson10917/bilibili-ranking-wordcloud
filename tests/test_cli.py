@@ -1,7 +1,4 @@
-"""命令行流程的回归测试。
-
-由 tests/test_core.py 按源码模块拆分而来；统一由 pytest 收集运行：python -m pytest tests
-"""
+"""命令行流程的回归测试。"""
 
 from __future__ import annotations
 
@@ -433,6 +430,45 @@ def test_cli_aggregate_ignores_non_timestamp_frequency_files() -> None:
             counts = {row["词"]: row["词频"] for row in csv.DictReader(stream)}
         # 魔方 = 历史 2 + 本次 1；备份里的 8 没被并进来。
         assert counts == {"魔方": "3", "教程": "1"}
+
+
+def test_cli_aggregate_deduplicates_same_utc_date() -> None:
+    # 同一天（UTC）多跑一次会产生两份时间戳词频 CSV（手动补跑撞上定时任务）；全并入会把
+    # 当天词频计两次。按 UTC 日期去重、每日期只取最新一份，同日较早的快照被丢弃。
+    from unittest.mock import patch
+
+    import bilibili_ranker.cli as cli_module
+    from bilibili_ranker.client import RankingFetchResult
+    from bilibili_ranker.storage import AGGREGATE_FREQUENCY_CSV_NAME
+
+    fetched = RankingFetchResult(
+        fetched_at=datetime(2024, 1, 1, 15, tzinfo=timezone.utc),
+        items=({"bvid": "BV1aa0000000", "title": "魔方教程"},),
+    )
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "word_frequency_20231231T120000Z.csv").write_text(
+            "词,词频\n教程,5\n", encoding="utf-8-sig"
+        )
+        (root / "word_frequency_20240101T090000Z.csv").write_text(
+            "词,词频\n魔方,2\n", encoding="utf-8-sig"
+        )
+        (root / "word_frequency_20240101T120000Z.csv").write_text(
+            "词,词频\n模型,3\n", encoding="utf-8-sig"
+        )
+
+        with (
+            patch.object(cli_module, "fetch_all_ranking", lambda **_: fetched),
+            patch.object(cli_module, "render_wordcloud", lambda *args, **__: Path(str(args[1]))),
+        ):
+            assert main(["--output-dir", directory, "--aggregate"]) == 0
+
+        with (root / AGGREGATE_FREQUENCY_CSV_NAME).open(encoding="utf-8-sig", newline="") as stream:
+            counts = {row["词"]: row["词频"] for row in csv.DictReader(stream)}
+        # 本次（15:00）是 20240101 当天最新，09:00/12:00 两份同日快照都被它取代；
+        # 前一天（20231231）的照常并入。未去重时魔方会是 3、模型会出现。
+        assert counts == {"教程": "6", "魔方": "1"}
 
 
 def test_cli_user_dict_missing_file_fails_before_network() -> None:

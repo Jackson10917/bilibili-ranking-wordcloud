@@ -163,15 +163,15 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     aggregate_csv: Path | None = None
     if args.aggregate:
         aggregate_target = args.output_dir / AGGREGATE_FREQUENCY_CSV_NAME
-        # 白名单只收时间戳形态（含 -2 跳号后缀）：聚合产物固定名与备份/改名产物
-        # （word_frequency_aggregate-2.csv 这类）都不匹配——前者防连续两次 --aggregate
-        # 把上次累计值翻倍，后者防用户备份静默污染累计。
+        # 白名单只收时间戳形态（含 -2 跳号后缀）：聚合产物固定名与备份/改名产物都不匹配。
         history = sorted(
             path
             for path in args.output_dir.glob("word_frequency_*.csv")
             if _TIMESTAMPED_FREQUENCY_PATTERN.fullmatch(path.name)
         )
-        merged = load_frequency_csvs(history)
+        # 同一 UTC 日期只取最新一份（文件名排序即时间序）：一天多跑会把当天词频计两次。
+        latest_per_date = {path.name[len("word_frequency_") :][:8]: path for path in history}
+        merged = load_frequency_csvs(latest_per_date.values())
         if merged:
             aggregate_csv = write_frequencies_csv(aggregate_target, merged)
             cloud_frequencies = merged
