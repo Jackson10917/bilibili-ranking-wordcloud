@@ -6,6 +6,7 @@ import re
 import unicodedata
 from collections import Counter
 from collections.abc import Iterable
+from importlib.resources import as_file, files
 from pathlib import Path
 
 from .models import VideoRankingRecord
@@ -36,6 +37,23 @@ def load_user_dictionary(path: str | Path) -> None:
 
     _jieba.setLogLevel("ERROR")
     _jieba.load_userdict(str(path))
+
+
+# 内置热词表：B站榜单主体是游戏/番剧名，jieba 只有通用词典会把「星穹铁道」这类新词
+# 切成碎片分头进榜。维护规则：--aggregate 的累计词频表里高频且被切碎的专名，回补一行。
+DEFAULT_USER_DICT = (
+    files("bilibili_ranker").joinpath("resources").joinpath("dict").joinpath("user_dict.txt")
+)
+
+
+def load_default_dictionary() -> None:
+    """加载内置热词表；高频专有名词（游戏名、番名）默认不被切碎。"""
+
+    import jieba as _jieba
+
+    _jieba.setLogLevel("ERROR")
+    with as_file(DEFAULT_USER_DICT) as path:
+        _jieba.load_userdict(str(path))
 
 
 def _has_out_of_dict_char(chunk: str) -> bool:
@@ -119,7 +137,11 @@ _URL_CHARS = r"[!-+\--:<-~]"
 _NOISE_PATTERN = re.compile(
     rf"https?://{_URL_CHARS}+"
     rf"|www\.{_URL_CHARS}+"
+    # 无点粘连前缀分支：xbilibili.com 必须整段剥掉——只按子域名前缀（要求带点）匹配
+    # 会从中间命中剥成 x、abcyoutube.com 剥成 abc，碎片过 minimum_token_length 直接进
+    # 词云。域名是显式名单且自带点号，粘连分支的误伤面接近于零。
     rf"|(?:[a-z0-9-]+\.)*(?:{_NOISY_DOMAIN_PATTERN})(?:[/?]{_URL_CHARS}*)?"
+    rf"|[a-z0-9-]*(?:{_NOISY_DOMAIN_PATTERN})(?:[/?]{_URL_CHARS}*)?"
     # 邮箱整体剥除：@ 前后片段都不是词元形状（zhang.san、gmail.com），逐段剥会漏。
     r"|[a-z0-9._%+\-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)+"
     r"|(?<![0-9A-Za-z])BV[0-9A-Za-z]{10}(?![0-9A-Za-z])",

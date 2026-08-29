@@ -12,7 +12,12 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from .cleaner import TitleAnalyzer, deduplicate_records, load_user_dictionary
+from .cleaner import (
+    TitleAnalyzer,
+    deduplicate_records,
+    load_default_dictionary,
+    load_user_dictionary,
+)
 from .client import MAX_TIMEOUT_SECONDS, fetch_all_ranking
 from .fonts import resolve_font_path
 from .models import parse_ranking_records
@@ -73,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--user-dict",
         type=Path,
-        help="jieba 用户词典路径（dict 格式），专有名词不被切碎",
+        help="jieba 用户词典路径（dict 格式），在内置热词表之上追加",
     )
     parser.add_argument(
         "--aggregate",
@@ -96,8 +101,10 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     if args.font_path is not None or os.environ.get("BILIBILI_WORDCLOUD_FONT"):
         resolved_font = resolve_font_path(args.font_path)
 
-    # 用户词典在首次分词前加载；文件不存在时 jieba 抛 OSError，同样不用等抓完整榜才报。
-    # 排在 mkdir 之前：与 --languages/--font-path 一致，参数写错不留下空目录。
+    # 内置热词表默认加载，--user-dict 是追加而非替代；两者都须在首次分词前完成。
+    # 显式 --user-dict 的文件校验排在 mkdir 之前：与 --languages/--font-path 一致，
+    # 参数写错不留下空目录。内置词典随包分发，不存在用户写错路径的问题。
+    load_default_dictionary()
     if args.user_dict is not None:
         load_user_dictionary(args.user_dict)
 
@@ -189,14 +196,16 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         except (RuntimeError, ValueError, OSError, MemoryError) as exc:
             print(f"警告：词云生成失败，仅输出 CSV：{exc}", file=sys.stderr)
 
+    # 键名用 ASCII：摘要 JSON 的消费者是脚本（jq、CI），中文键名对下游不友好；
+    # 字段含义由 README 的字段表承载。
     return {
-        "抓取条数": len(fetched.items),
-        "有效条数": len(accepted),
-        "拒绝条数": rejected_count,
-        "排行榜CSV": str(bundle.ranking_csv.resolve()),
-        "词频CSV": str(frequency_csv.resolve()) if frequency_csv else None,
-        "聚合词频CSV": str(aggregate_csv.resolve()) if aggregate_csv else None,
-        "词云": str(generated_wordcloud) if generated_wordcloud else None,
+        "fetched": len(fetched.items),
+        "accepted": len(accepted),
+        "rejected": rejected_count,
+        "ranking_csv": str(bundle.ranking_csv.resolve()),
+        "frequency_csv": str(frequency_csv.resolve()) if frequency_csv else None,
+        "aggregate_frequency_csv": str(aggregate_csv.resolve()) if aggregate_csv else None,
+        "wordcloud": str(generated_wordcloud) if generated_wordcloud else None,
     }
 
 
