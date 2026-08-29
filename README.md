@@ -122,7 +122,7 @@ output/
 
 加 `--no-fetch` 时本次不请求接口、不写时间戳产物，只对目录里已有的词频 CSV 重新聚合并重渲染累计词云——换字体、调尺寸、重出图不再要求联网再抓一次榜；输出目录还没有任何词频 CSV 时只警告不报错。此时摘要里 `fetched`/`accepted`/`rejected` 为 0，`ranking_csv`/`frequency_csv` 为 `null`。
 
-仓库自带日更闭环：`.github/workflows/daily-data.yml` 每天北京时间 9 点自动抓一次榜，把时间戳快照与累计产物提交回仓库的 `data/` 目录（Actions 页面也可手动触发）。本地想自己攒数据，固定一个 `--output-dir` 每天跑一次即可，效果相同。`data/wordcloud_aggregate.png` 是按累计词频渲染的最新词云：
+仓库自带日更闭环：`.github/workflows/daily-data.yml` 每天北京时间 9 点自动抓一次榜，把时间戳 CSV 快照与累计产物提交回仓库的 `data/` 目录（Actions 页面也可手动触发）。本地想自己攒数据，固定一个 `--output-dir` 每天跑一次即可，效果相同。`data/wordcloud_aggregate.png` 是按累计词频渲染的最新词云：
 
 ![累计词云（每日自动更新）](data/wordcloud_aggregate.png)
 
