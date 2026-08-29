@@ -305,7 +305,9 @@ def test_email_and_filename_noise_stripped() -> None:
 
 
 def test_user_dictionary_keeps_proper_nouns_whole() -> None:
-    # jieba 通用词典没有星穹铁道，拆成 星穹+铁道 分头进榜；用户词典加载后整词保留。
+    # jieba 通用词典没有破晓传说，拆成 破晓+传说 分头进榜；用户词典加载后整词保留。
+    # 用不在内置热词表里的专名做对照：cli 会默认加载内置词典，jieba 词典是进程级
+    # 全局状态，「加载前不整词」的断言对内置词不可靠。
     import tempfile
     from pathlib import Path
 
@@ -313,16 +315,54 @@ def test_user_dictionary_keeps_proper_nouns_whole() -> None:
 
     analyzer = TitleAnalyzer(load_stopword_policy())
     record = VideoRankingRecord.from_api_item(
-        {"bvid": "BV1aa0000000", "title": "崩坏星穹铁道 攻略"}, rank=1
+        {"bvid": "BV1aa0000000", "title": "破晓传说 攻略"}, rank=1
     )
-    assert "星穹铁道" not in analyzer.analyze([record])
+    assert "破晓传说" not in analyzer.analyze([record])
 
     with tempfile.TemporaryDirectory() as directory:
         dict_file = Path(directory) / "userdict.txt"
-        dict_file.write_text("星穹铁道\n", encoding="utf-8")
+        dict_file.write_text("破晓传说\n", encoding="utf-8")
         load_user_dictionary(dict_file)
 
-    assert "星穹铁道" in analyzer.analyze([record])
+    assert "破晓传说" in analyzer.analyze([record])
+
+
+def test_default_dictionary_keeps_builtin_proper_nouns_whole() -> None:
+    # 内置热词表随包分发且由 cli 默认加载：榜单主体的游戏名不被切成 星穹+铁道
+    # 两个独立词条（崩坏 直接丢失）。
+    from bilibili_ranker.cleaner import load_default_dictionary
+
+    load_default_dictionary()
+    analyzer = TitleAnalyzer(load_stopword_policy())
+    record = VideoRankingRecord.from_api_item(
+        {"bvid": "BV1aa0000000", "title": "崩坏星穹铁道 攻略"}, rank=1
+    )
+    frequencies = analyzer.analyze([record])
+    assert "崩坏星穹铁道" in frequencies and "星穹铁道" not in frequencies, frequencies
+
+
+def test_domain_prefix_fragments_stripped() -> None:
+    # 域名剥除分支原先没有左边界：xbilibili.com 会从中间命中剥成 x、abcyoutube.com
+    # 剥成 abc——碎片过 minimum_token_length 直接进词云。
+    from bilibili_ranker.cleaner import normalize_title
+
+    assert normalize_title("xbilibili.com 测试") == "测试"
+    assert normalize_title("abcyoutube.com/watch 转载") == "转载"
+    # 紧贴中文的裸域名照旧剥除（CJK 不挡 lookbehind）。
+    assert normalize_title("传送门bilibili.com/video 收藏") == "传送门 收藏"
+
+
+def test_brand_glued_token_dropped() -> None:
+    # bilibililionly 这类品牌粘连词逃过停用词精确匹配（bilibili 已在表、粘连后命中不了），
+    # 直接入表。通用「品牌前缀 + 纯拉丁后缀」规则试过并否决：停用词里的 mine 会把
+    # minecraft 一并杀掉。
+    analyzer = TitleAnalyzer(load_stopword_policy())
+    record = VideoRankingRecord.from_api_item(
+        {"bvid": "BV1aa0000000", "title": "bilibilionly 独家 活动"}, rank=1
+    )
+    frequencies = analyzer.analyze([record])
+    assert "bilibilionly" not in frequencies, frequencies
+    assert "独家" in frequencies and "活动" in frequencies
 
 
 def test_zero_width_characters_do_not_split_tokens() -> None:

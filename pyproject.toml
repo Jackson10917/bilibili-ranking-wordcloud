@@ -67,5 +67,11 @@ where = ["src"]
 bilibili_ranker = [
   "resources/stopwords/*.txt",
   "resources/stopwords/*.md",
+  "resources/dict/*.txt",
 ]
+
+# src 布局下让裸 pytest（不经 editable 安装）也能找到包。
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
 

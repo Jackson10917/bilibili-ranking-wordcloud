@@ -109,7 +109,7 @@ def test_csv_written_before_tokenization() -> None:
 
 
 def test_main_reconfigures_stdout_to_utf8() -> None:
-    # Windows 上重定向 stdout 时用的是 ANSI 代码页，含中文键的摘要 JSON 会抛
+    # Windows 上重定向 stdout 时用的是 ANSI 代码页，摘要 JSON 含中文值（输出路径）会抛
     # UnicodeEncodeError：活干完了却报错退出。main 开头必须把两个流都拉到 UTF-8。
     import io
     from unittest.mock import patch
