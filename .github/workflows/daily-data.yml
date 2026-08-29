@@ -33,7 +33,12 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data
+          # 只收 CSV 快照与累计词云：时间戳 PNG 是单次快照渲染，字号不编码有效信息，
+          # 且每日一张二进制只会撑爆仓库历史；要用可从 CSV 重渲染。
+          git add data/*.csv
+          if [ -f data/wordcloud_aggregate.png ]; then
+            git add data/wordcloud_aggregate.png
+          fi
           if git diff --cached --quiet; then
             echo "没有新增数据，跳过提交"
           else
