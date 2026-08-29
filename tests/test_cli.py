@@ -476,6 +476,77 @@ def test_cli_aggregate_deduplicates_same_utc_date() -> None:
         assert counts == {"教程": "10", "魔方": "1"}
 
 
+def test_cli_no_fetch_requires_aggregate() -> None:
+    # 离线模式只定义在聚合路径上：单独的 --no-fetch 没有可渲染的词频来源，按参数错误拒绝。
+    try:
+        main(["--output-dir", "unused", "--no-fetch"])
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("--no-fetch 单独使用应该被拒绝")
+
+
+def test_cli_no_fetch_aggregate_merges_offline() -> None:
+    # --aggregate 的输入全是本地 CSV：重渲染累计词云不该要求再抓一次榜。
+    # fetch 打桩成 AssertionError——离线路径若误触网络，测试会当场炸出。
+    from unittest.mock import patch
+
+    import bilibili_ranker.cli as cli_module
+    from bilibili_ranker.storage import (
+        AGGREGATE_FREQUENCY_CSV_NAME,
+        AGGREGATE_WORDCLOUD_PNG_NAME,
+    )
+
+    def boom(**_: object) -> object:
+        raise AssertionError("--no-fetch 不应该发起网络请求")
+
+    def fake_render(*args: object, **__: object) -> Path:
+        destination = Path(str(args[1]))
+        destination.write_bytes(b"\x89PNG\r\n\x1a\n")
+        return destination
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "word_frequency_20240101T000000Z.csv").write_text(
+            "词,词频\n魔方,2\n", encoding="utf-8-sig"
+        )
+        (root / "word_frequency_20240102T000000Z.csv").write_text(
+            "词,词频\n模型,3\n", encoding="utf-8-sig"
+        )
+
+        with (
+            patch.object(cli_module, "fetch_all_ranking", boom),
+            patch.object(cli_module, "render_wordcloud", fake_render),
+        ):
+            assert main(["--output-dir", directory, "--aggregate", "--no-fetch"]) == 0
+
+        with (root / AGGREGATE_FREQUENCY_CSV_NAME).open(encoding="utf-8-sig", newline="") as stream:
+            counts = {row["词"]: row["词频"] for row in csv.DictReader(stream)}
+        assert counts == {"模型": "3", "魔方": "2"}
+        assert (root / AGGREGATE_WORDCLOUD_PNG_NAME).exists()
+        # 不抓榜就不写时间戳产物：榜单 CSV 零落盘，已有词频 CSV 原样保留。
+        assert not list(root.glob("ranking_*.csv"))
+        assert (root / "word_frequency_20240101T000000Z.csv").exists()
+
+
+def test_cli_no_fetch_aggregate_empty_dir_exits_zero() -> None:
+    # 空目录离线聚合：与联网 --aggregate 一致，警告后退出码 0，不产出任何文件。
+    from unittest.mock import patch
+
+    import bilibili_ranker.cli as cli_module
+
+    def boom(**_: object) -> object:
+        raise AssertionError("--no-fetch 不应该发起网络请求")
+
+    with tempfile.TemporaryDirectory() as directory:
+        with (
+            patch.object(cli_module, "fetch_all_ranking", boom),
+            patch.object(cli_module, "render_wordcloud", lambda *args, **__: Path(str(args[1]))),
+        ):
+            assert main(["--output-dir", directory, "--aggregate", "--no-fetch"]) == 0
+        assert not list(Path(directory).iterdir())
+
+
 def test_cli_user_dict_missing_file_fails_before_network() -> None:
     # 用户词典路径错误必须在抓取前报错退出（退出码 1）；fetch 若被触达会让测试炸出
     # ZeroDivisionError，保证「不白抓一整榜」是实测的而不是假设的。

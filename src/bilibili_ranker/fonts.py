@@ -133,6 +133,8 @@ def resolve_font_path(explicit: str | Path | None = None) -> Path:
     if configured:
         return _validate_font_file(configured, source="BILIBILI_WORDCLOUD_FONT")
 
+    # 只按候选文件名在目录顶层命中，不递归子目录（家目录可能是网络盘，整树遍历会卡住）；
+    # 嵌套安装的字体（Debian 的 opentype/noto 等）由 fontconfig 兜底，两者皆无时用 --font-path。
     for root in _standard_font_roots():
         if not root.is_dir():
             continue
@@ -140,20 +142,6 @@ def resolve_font_path(explicit: str | Path | None = None) -> Path:
             direct = root / filename
             if direct.is_file():
                 return direct.resolve()
-        try:
-            matches: dict[str, Path] = {}
-            for path in root.rglob("*"):
-                # 同名字体取排序最小的路径：rglob 顺序依赖文件系统，不排序两台机器可能选到
-                # 不同字体，词云就不可复现（渲染另有 random_state=42）。
-                if path.name in _CANDIDATE_FILES and path.is_file():
-                    existing = matches.get(path.name)
-                    if existing is None or str(path) < str(existing):
-                        matches[path.name] = path
-        except OSError:
-            continue
-        for filename in _CANDIDATE_FILES:
-            if filename in matches:
-                return matches[filename].resolve()
 
     fontconfig_font = _fontconfig_match()
     if fontconfig_font:
