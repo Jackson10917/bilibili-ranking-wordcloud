@@ -179,6 +179,21 @@ def test_load_frequency_csvs_skips_unreadable_file() -> None:
     assert merged == {"魔方": 3}
 
 
+def test_load_frequency_csvs_skips_nonpositive_counts() -> None:
+    # 词频 0/负数只可能来自手改或损坏的文件：照常聚合会让 wordcloud 渲染出一张看似
+    # 正常、数据错误的图，与「坏行跳过」的其余分支同权处理。
+    from bilibili_ranker.storage import load_frequency_csvs
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        bad = root / "word_frequency_20240101T000000Z.csv"
+        bad.write_text("词,词频\n魔方,5\n零,0\n负数,-3\n", encoding="utf-8-sig")
+
+        merged = load_frequency_csvs((bad,))
+
+    assert merged == {"魔方": 5}
+
+
 def test_load_frequency_csvs_skips_bad_encoding_and_oversized_field() -> None:
     # Excel「另存为」默认 ANSI/GBK，重读抛 UnicodeDecodeError——它是 ValueError 的子类
     # 而非 OSError；超过 csv 模块默认字段上限（131072 字符）的行抛 csv.Error。

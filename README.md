@@ -152,7 +152,7 @@ output/
 | --- | --- |
 | 0 | 成功（含「只输出 CSV」的降级情况） |
 | 1 | 运行期失败：网络/风控、整榜解析失败、语言代码不被支持、`--resource-dir` 缺文件、显式指定的字体（`--font-path`/环境变量）不可用、`--user-dict` 文件不可读 |
-| 2 | argparse 参数格式错误：未知参数、类型不符、`--timeout`/`--width`/`--height`/`--max-words`/`--minimum-token-length` 取值越界 |
+| 2 | argparse 参数格式错误：未知参数、类型不符、`--timeout`/`--width`/`--height`/`--max-words`/`--minimum-token-length`/`--rid` 取值越界 |
 | 130 | Ctrl+C 中断 |
 
 注意 `--languages zh,xx`、`--resource-dir` 缺文件与显式指定的字体不可用，同属「值有效但资源不可用」，在流程内报错，退出码是 1 而非 2。显式指定的字体在发起抓取之前就完成校验，失败时不会写任何文件。

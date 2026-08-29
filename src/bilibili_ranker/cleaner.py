@@ -39,7 +39,11 @@ def load_user_dictionary(path: str | Path) -> None:
 
 
 def _has_out_of_dict_char(chunk: str) -> bool:
-    """块内是否含 jieba 中文词典外的字符——日文汉字（転/気/況）的语种信号。"""
+    """块内是否含 jieba 中文词典外的字符——日文汉字（転/気/況）的语种信号。
+
+    dt.FREQ 是 jieba 的私有词典频表（非公开 API），当前版本 0.42 稳定存在且依赖
+    已钉 <1；升级 jieba 大版本时此处需要复核。
+    """
 
     import jieba as _jieba
 
