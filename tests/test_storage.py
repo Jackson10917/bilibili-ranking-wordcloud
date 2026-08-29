@@ -10,6 +10,9 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from hypothesis import given
+from hypothesis import strategies as st
+
 from bilibili_ranker.models import VideoRankingRecord
 from bilibili_ranker.storage import write_records_csv
 
@@ -212,3 +215,22 @@ def test_load_frequency_csvs_skips_bad_encoding_and_oversized_field() -> None:
         merged = load_frequency_csvs((gbk, oversized, good))
 
     assert merged == {"魔方": 2}
+
+
+@given(
+    word=st.text(min_size=1).filter(lambda value: not value.startswith("'")),
+    count=st.integers(min_value=1),
+)
+def test_frequency_csv_write_read_roundtrip(word: str, count: int) -> None:
+    # 写读往返是 --aggregate 闭环的根基：聚合的输入正是 write_frequencies_csv 的产物，
+    # 词列经 _spreadsheet_safe 转义、读取侧剥单引号，对任意词必须无损往返（含全部六个
+    # 公式前缀、逗号、引号、换行等 csv 元字符）。词首带 ' 的输入读取时被剥一层引号，
+    # 是读取侧的既定防御行为——分词 chunk 永不以 ' 开头，仅手改文件可达，不在域内。
+    from bilibili_ranker.storage import load_frequency_csvs, write_frequencies_csv
+
+    with tempfile.TemporaryDirectory() as directory:
+        destination = Path(directory) / "freq.csv"
+        write_frequencies_csv(destination, {word: count})
+        loaded = load_frequency_csvs((destination,))
+
+    assert loaded == {word: count}
