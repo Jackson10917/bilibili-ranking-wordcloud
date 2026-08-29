@@ -119,8 +119,9 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     # 停用词加载不依赖网络：参数错误在发请求前就报出来，不白抓一整榜。
     policy = load_stopword_policy(args.resource_dir, languages=args.languages)
 
-    # 显式字体（--font-path 或环境变量）同理在写盘和请求之前校验；两处都没给时把自动探测
-    # 留给渲染期——那是「环境缺中日韩字体」的可降级故障，不是用户输错参数。
+    # 显式字体（--font-path 或环境变量）在此校验：无效字体是参数错误而非可降级故障，
+    # 抓不抓榜都应在动任何输出之前报出来；两处都没给时把自动探测留给渲染期——
+    # 那是「环境缺中日韩字体」的可降级故障，不是用户输错参数。
     resolved_font: Path | None = None
     if args.font_path is not None or os.environ.get("BILIBILI_WORDCLOUD_FONT"):
         resolved_font = resolve_font_path(args.font_path)
@@ -130,9 +131,6 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     load_default_dictionary()
     if args.user_dict is not None:
         load_user_dictionary(args.user_dict)
-
-    # 输出目录先探：CSV 先落盘的设计下，目录不可写会白抓一整榜。
-    args.output_dir.mkdir(parents=True, exist_ok=True)
 
     # 输出目录先探：CSV 先落盘的设计下，目录不可写会白抓一整榜。
     args.output_dir.mkdir(parents=True, exist_ok=True)
