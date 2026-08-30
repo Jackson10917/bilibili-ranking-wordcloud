@@ -61,7 +61,7 @@ def _standard_font_roots() -> Iterable[Path]:
 
 # sfnt 容器的魔数：TrueType(00 01 00 00 / true)、TrueType Collection(ttcf)、OpenType CFF(OTTO)。
 # 只看后缀会放过改名成 .ttf 的文本文件，拖到渲染期才炸。
-_SFNT_MAGICS = (b"\x00\x01\x00\x00", b"true", b"ttcf", b"OTTO", b"typ1")
+_SFNT_MAGICS = (b"\x00\x01\x00\x00", b"true", b"ttcf", b"OTTO")
 
 
 def _validate_font_file(path: str | Path, *, source: str) -> Path:
