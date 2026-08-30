@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import os
+import sys
 import uuid
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
@@ -162,9 +163,12 @@ def load_frequency_csvs(paths: Iterable[Path]) -> dict[str, int]:
 
     读取的是自家产物，只做对称的逆操作：词列剥掉公式前缀转义的单引号；
     个别坏文件（如历史 CSV 正被 Excel 占用）或坏行跳过，而不是炸掉整个聚合。
+    但跳过必须留痕——聚合卖点是跨天累计，静默少一天时退出码与摘要照常正常，
+    无人能察觉；失败文件在循环结束后按路径统一警告到 stderr。
     """
 
     merged: Counter[str] = Counter()
+    failed: list[Path] = []
     for path in paths:
         try:
             with path.open("r", encoding="utf-8-sig", newline="") as stream:
@@ -183,7 +187,10 @@ def load_frequency_csvs(paths: Iterable[Path]) -> dict[str, int]:
         # UnicodeDecodeError（历史 CSV 被 Excel 另存成 ANSI）和 csv.Error（超长字段）
         # 都不是 OSError 子类。
         except (OSError, UnicodeDecodeError, csv.Error):
-            continue
+            failed.append(path)
+    if failed:
+        names = "、".join(str(path) for path in failed)
+        print(f"警告：{len(failed)} 个词频 CSV 读取失败，已跳过：{names}", file=sys.stderr)
     return dict(merged.most_common())
 
 
