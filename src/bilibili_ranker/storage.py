@@ -185,3 +185,20 @@ def load_frequency_csvs(paths: Iterable[Path]) -> dict[str, int]:
         except (OSError, UnicodeDecodeError, csv.Error):
             continue
     return dict(merged.most_common())
+
+
+# 词频趋势表：近 7 个快照日 vs 前 7 个的排名变化，固定名滚动快照，原子覆盖。
+# 固定名同样不匹配 cli 的时间戳白名单，不会把自己并进累计或下一轮趋势。
+TREND_CSV_NAME = "word_frequency_trend.csv"
+
+TREND_CSV_HEADERS = ("词", "状态", "上期排名", "上期词频", "本期排名", "本期词频", "排名变化")
+
+
+def write_trend_csv(destination: Path, rows: Iterable[Mapping[str, Any]]) -> Path:
+    """写出趋势行（build_trend 的产物）；词与状态同源于投稿标题，沿用公式前缀转义。"""
+
+    escaped = (
+        {key: (_spreadsheet_safe(value) if key == "词" else value) for key, value in row.items()}
+        for row in rows
+    )
+    return _atomic_csv_write(destination, TREND_CSV_HEADERS, escaped)
