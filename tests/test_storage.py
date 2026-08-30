@@ -218,7 +218,13 @@ def test_load_frequency_csvs_skips_bad_encoding_and_oversized_field() -> None:
 
 
 @given(
-    word=st.text(min_size=1).filter(lambda value: not value.startswith("'")),
+    # 域 = 真实可达的词：utf-8 可编码（surrogate 连 utf-8-sig 都编不出）且非 NUL——
+    # 3.10 的 csv 读写两侧都把未设置的 escapechar 存成 '\0'，词里含 NUL 会被当转义符
+    # 吞掉或直接抛 "need to escape"（3.14 已无此问题）。分词 chunk 模式只匹配字母/
+    # 数字/中日韩文区间，这两类控制字符本就不可达。
+    word=st.text(
+        min_size=1, alphabet=st.characters(codec="utf-8", exclude_characters="\x00")
+    ).filter(lambda value: not value.startswith("'")),
     count=st.integers(min_value=1),
 )
 def test_frequency_csv_write_read_roundtrip(word: str, count: int) -> None:
