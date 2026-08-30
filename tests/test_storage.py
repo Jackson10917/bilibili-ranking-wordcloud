@@ -10,6 +10,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -215,6 +216,33 @@ def test_load_frequency_csvs_skips_bad_encoding_and_oversized_field() -> None:
         merged = load_frequency_csvs((gbk, oversized, good))
 
     assert merged == {"魔方": 2}
+
+
+def test_load_frequency_csvs_warns_skipped_files_to_stderr(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # 坏文件跳过不能是静默的：聚合卖点是跨天累计，整份快照消失时退出码与摘要照常
+    # 正常，日更跑在 Actions 上没人比对行数，累计口径少一天无法察觉。跳过必须警告
+    # 到 stderr 并点名文件；全部可读时一个字都不能有，不给 CI 添噪声。
+    from bilibili_ranker.storage import load_frequency_csvs
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        good = root / "word_frequency_20240101T000000Z.csv"
+        good.write_text("词,词频\n魔方,2\n", encoding="utf-8-sig")
+        gbk = root / "word_frequency_20240102T000000Z.csv"
+        gbk.write_bytes("词,词频\n测试,5\n".encode("gbk"))
+
+        merged = load_frequency_csvs((gbk, good))
+        warned = capsys.readouterr().err
+
+        clean = load_frequency_csvs((good,))
+        quiet = capsys.readouterr().err
+
+    assert merged == {"魔方": 2}
+    assert "word_frequency_20240102T000000Z.csv" in warned
+    assert clean == {"魔方": 2}
+    assert quiet == ""
 
 
 @given(
