@@ -25,14 +25,16 @@ from .stopwords import DEFAULT_LANGUAGES, load_stopword_policy
 from .storage import (
     AGGREGATE_FREQUENCY_CSV_NAME,
     AGGREGATE_WORDCLOUD_PNG_NAME,
+    TREND_CSV_NAME,
     create_output_bundle,
     load_frequency_csvs,
     write_frequencies_csv,
     write_records_csv,
+    write_trend_csv,
 )
 from .wordcloud import render_wordcloud
 
-# --aggregate 只合并时间戳形态（含 -2 跳号后缀）的词频 CSV。
+# --aggregate 与 --trend 只认时间戳形态（含 -2 跳号后缀）的词频 CSV。
 _TIMESTAMPED_FREQUENCY_PATTERN = re.compile(r"word_frequency_\d{8}T\d{6}Z(?:-\d+)?\.csv")
 
 
@@ -43,8 +45,8 @@ def _history_order(path: Path) -> tuple[str, int]:
     return timestamp, int(number or 0)
 
 
-def _merged_history(output_dir: Path) -> dict[str, int]:
-    # 白名单只收时间戳形态（含 -2 跳号后缀）：聚合产物固定名与备份/改名产物都不匹配。
+def _latest_frequency_paths(output_dir: Path) -> list[Path]:
+    # 白名单只收时间戳形态（含 -2 跳号后缀）：聚合/趋势产物固定名与备份/改名产物都不匹配。
     history = sorted(
         (
             path
@@ -53,9 +55,66 @@ def _merged_history(output_dir: Path) -> dict[str, int]:
         ),
         key=_history_order,
     )
-    # 同一 UTC 日期只取最新一份：一天多跑会把当天词频计两次。
+    # 同一 UTC 日期只取最新一份：一天多跑会把当天词频计两次；按时间序返回。
     latest_per_date = {path.name[len("word_frequency_") :][:8]: path for path in history}
-    return load_frequency_csvs(latest_per_date.values())
+    return sorted(latest_per_date.values(), key=_history_order)
+
+
+def _merged_history(output_dir: Path) -> dict[str, int]:
+    return load_frequency_csvs(_latest_frequency_paths(output_dir))
+
+
+# 趋势窗口：近 7 个快照日 vs 前 7 个。窗口按快照日数而不是日历天切——上游断更时窗口
+# 顺延，口径始终是「最近 7 期对比再往前 7 期」。
+_TREND_WINDOW = 7
+
+
+def _trend_rows(output_dir: Path) -> list[dict[str, Any]] | None:
+    """近 7 个快照日 vs 前 7 个的词频排名变化；可对比的历史不足两期时返回 None。"""
+
+    paths = _latest_frequency_paths(output_dir)
+    previous_paths, recent_paths = paths[:-_TREND_WINDOW], paths[-_TREND_WINDOW:]
+    if not previous_paths:
+        return None
+    previous = load_frequency_csvs(previous_paths)
+    recent = load_frequency_csvs(recent_paths)
+    # 排名就是词频降序的位次（load_frequency_csvs 已按降序返回）；并列词频按日期先后定序。
+    previous_rank = {word: rank for rank, word in enumerate(previous, start=1)}
+    rows: list[dict[str, Any]] = []
+    for rank, (word, count) in enumerate(recent.items(), start=1):
+        old_rank = previous_rank.get(word)
+        if old_rank is None:
+            delta: Any = ""
+            status = "新进"
+        else:
+            delta = old_rank - rank
+            status = "持平" if delta == 0 else ("上升" if delta > 0 else "下降")
+        rows.append(
+            {
+                "词": word,
+                "状态": status,
+                "上期排名": old_rank if old_rank is not None else "",
+                "上期词频": previous.get(word, ""),
+                "本期排名": rank,
+                "本期词频": count,
+                "排名变化": delta,
+            }
+        )
+    # 掉出词垫底，沿用上期词频降序（previous 本身就是降序字典）；缺席侧的单元格留空。
+    for rank, (word, count) in enumerate(previous.items(), start=1):
+        if word not in recent:
+            rows.append(
+                {
+                    "词": word,
+                    "状态": "掉出",
+                    "上期排名": rank,
+                    "上期词频": count,
+                    "本期排名": "",
+                    "本期词频": "",
+                    "排名变化": "",
+                }
+            )
+    return rows
 
 
 def _language_codes(value: str) -> tuple[str, ...]:
@@ -110,7 +169,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-fetch",
         action="store_true",
-        help="不请求排行榜，只做 --aggregate 的离线聚合与重渲染（需与 --aggregate 连用）",
+        help="不请求排行榜，只做离线的聚合重渲染或趋势分析（需与 --aggregate 或"
+        " --trend 连用，单独使用按参数错误退出）",
+    )
+    parser.add_argument(
+        "--trend",
+        action="store_true",
+        help="对比输出目录近 7 个快照日与前 7 个快照日的词频排名，输出趋势 CSV"
+        "（可对比的历史不足两期时只警告不产出）",
     )
     return parser
 
@@ -129,6 +195,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     ranking_csv: Path | None = None
     frequency_csv: Path | None = None
     aggregate_csv: Path | None = None
+    trend_csv: Path | None = None
     generated_wordcloud: Path | None = None
     cloud_frequencies: Mapping[str, int] | None = None
     cloud_destination: Path | None = None
@@ -204,6 +271,16 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         else:
             print("警告：输出目录没有可聚合的词频 CSV。", file=sys.stderr)
 
+    # 趋势表独立于聚合：只读目录里已有快照，可与 --aggregate 同跑（日更工作流），
+    # 也可与 --no-fetch 连用做纯离线分析。历史不足两期时没有可比对象，只警告不产出——
+    # 全「新进」的表只是当天词频的换皮，落盘反而让定时任务把噪声当产物。
+    if args.trend:
+        trend_rows = _trend_rows(args.output_dir)
+        if trend_rows is None:
+            print("警告：可对比的词频快照不足两期，未产出趋势表。", file=sys.stderr)
+        else:
+            trend_csv = write_trend_csv(args.output_dir / TREND_CSV_NAME, trend_rows)
+
     if cloud_frequencies is not None and cloud_destination is not None:
         try:
             generated_wordcloud = render_wordcloud(
@@ -227,6 +304,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         "ranking_csv": str(ranking_csv.resolve()) if ranking_csv else None,
         "frequency_csv": str(frequency_csv.resolve()) if frequency_csv else None,
         "aggregate_frequency_csv": str(aggregate_csv.resolve()) if aggregate_csv else None,
+        "trend_csv": str(trend_csv.resolve()) if trend_csv else None,
         "wordcloud": str(generated_wordcloud) if generated_wordcloud else None,
     }
 
@@ -250,8 +328,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--minimum-token-length 必须大于 0")
     if args.rid < 0:
         parser.error("--rid 必须不小于 0")
-    if args.no_fetch and not args.aggregate:
-        parser.error("--no-fetch 需要与 --aggregate 一起使用")
+    if args.no_fetch and not (args.aggregate or args.trend):
+        parser.error("--no-fetch 需要与 --aggregate 或 --trend 一起使用")
 
     try:
         summary = run_pipeline(args)

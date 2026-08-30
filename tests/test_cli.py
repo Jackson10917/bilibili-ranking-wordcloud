@@ -600,3 +600,72 @@ def test_cli_no_fetch_skips_tokenizer_setup() -> None:
         ):
             assert main(["--output-dir", str(root), "--aggregate", "--no-fetch"]) == 0
         assert (root / AGGREGATE_FREQUENCY_CSV_NAME).exists()
+
+
+def test_cli_trend_compares_last_two_windows() -> None:
+    # --trend 把快照日切成 近7期 vs 前7期 两窗输出排名变化；窗口按快照日数切，
+    # 不按日历天（上游断更窗口顺延）。夹具词频无并列，期望排名与状态完全确定。
+    from bilibili_ranker.storage import TREND_CSV_NAME
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        # 上期 = d1+d2，本期 = d3..d9（9 份快照 → 近 7 期对比再往前 2 期）。
+        # 两窗词频与排名：掉出10(1) 下降8(2) 持平5(3) 上升3(4) 填料1(5) ←→
+        # 上升9(1) 填料6(2) 持平5(3) 下降4(4) 新进1(5)。
+        snapshots = {
+            "word_frequency_20240101T000000Z.csv": "词,词频\n掉出词,10\n填料词,1\n",
+            "word_frequency_20240102T000000Z.csv": "词,词频\n下降词,8\n持平词,5\n上升词,3\n",
+            "word_frequency_20240103T000000Z.csv": "词,词频\n下降词,4\n持平词,5\n上升词,9\n",
+            "word_frequency_20240104T000000Z.csv": "词,词频\n填料词,2\n",
+            "word_frequency_20240105T000000Z.csv": "词,词频\n填料词,1\n",
+            "word_frequency_20240106T000000Z.csv": "词,词频\n填料词,1\n",
+            "word_frequency_20240107T000000Z.csv": "词,词频\n填料词,1\n",
+            "word_frequency_20240108T000000Z.csv": "词,词频\n填料词,1\n",
+            "word_frequency_20240109T000000Z.csv": "词,词频\n新进词,1\n",
+        }
+        for name, content in snapshots.items():
+            (root / name).write_text(content, encoding="utf-8-sig")
+
+        assert main(["--output-dir", directory, "--no-fetch", "--trend"]) == 0
+
+        with (root / TREND_CSV_NAME).open(encoding="utf-8-sig", newline="") as stream:
+            rows = list(csv.DictReader(stream))
+        assert [(row["词"], row["状态"]) for row in rows] == [
+            ("上升词", "上升"),
+            ("填料词", "上升"),
+            ("持平词", "持平"),
+            ("下降词", "下降"),
+            ("新进词", "新进"),
+            ("掉出词", "掉出"),
+        ]
+        by_word = {row["词"]: row for row in rows}
+        assert by_word["上升词"] == {
+            "词": "上升词",
+            "状态": "上升",
+            "上期排名": "4",
+            "上期词频": "3",
+            "本期排名": "1",
+            "本期词频": "9",
+            "排名变化": "3",
+        }
+        # 缺席侧的单元格留空：新进词没有上期数据，掉出词没有本期数据。
+        assert by_word["新进词"]["上期排名"] == ""
+        assert by_word["新进词"]["上期词频"] == ""
+        assert by_word["掉出词"]["本期排名"] == ""
+        assert by_word["掉出词"]["本期词频"] == ""
+
+
+def test_cli_trend_insufficient_history_skips_output() -> None:
+    # 快照不足两期时没有可比对象：警告后退出码 0，不产出趋势文件——全「新进」的表
+    # 只是当天词频的换皮，落盘反而让日更工作流把噪声当产物提交。
+    from bilibili_ranker.storage import TREND_CSV_NAME
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "word_frequency_20240101T000000Z.csv").write_text(
+            "词,词频\n魔方,2\n", encoding="utf-8-sig"
+        )
+
+        assert main(["--output-dir", directory, "--no-fetch", "--trend"]) == 0
+
+        assert not (root / TREND_CSV_NAME).exists()
