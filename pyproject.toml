@@ -31,7 +31,7 @@ bilibili-rank = "bilibili_ranker.cli:main"
 test = ["hypothesis>=6,<7", "pytest>=7,<10", "pytest-cov==7.1.0"]
 # numpy 是 wordcloud 经 matplotlib 带入的传递依赖，本项目代码从不 import；2.5 起的内联存根
 # 用 PEP 695 语法，mypy 按 python_version=3.10 解析会 syntax error。存根恢复兼容后移除该上限。
-lint = ["mypy==2.3.1", "numpy<2.5", "ruff==0.16.4", "types-requests==2.33.0.20260712"]
+lint = ["mypy==2.3.1", "numpy<2.5", "ruff==0.16.5", "types-requests==2.33.0.20260712"]
 
 [tool.ruff]
 target-version = "py310"
