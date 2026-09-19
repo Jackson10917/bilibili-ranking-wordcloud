@@ -1,16 +1,14 @@
 # B站排行榜与标题词云
 
-每天看看 B 站榜上都在聊什么。
-
 这个小工具会抓取排行榜，把视频信息保存成 CSV，再从标题里统计词频、生成词云。连续收集几天后，还能查看累计词频，以及哪些词最近出现得更多。
 
 统计只来自视频标题，适合观察榜单话题，不能代表视频内容或整个 B 站的热度。
 
-## 先跑一次
+## 运行条件
 
 需要 Python 3.10 或更高版本，以及能正常访问 B 站的网络。生成中文词云还需要系统里有中文字体。
 
-先下载代码：
+下载代码：
 
 ```bash
 git clone https://github.com/Jackson10917/bilibili-ranking-wordcloud.git
@@ -75,19 +73,15 @@ python -m bilibili_ranker --output-dir output --no-fetch --aggregate --trend
 
 不同分区请分开目录保存，避免混在一起统计。可以用 `--rid` 指定 B 站接口支持的分区 ID，默认 `0` 是全站榜。
 
-## 让词云少一点套话
-
 标题里常有“完整版”“全网首发”或活动标签。它们反复出现，却不一定能说明视频在讲什么。项目会过滤这些内容，同时尽量保留游戏名、歌曲名，以及 AI、MV 等有意义的短词。
 
-词表放在 [resources/stopwords](src/bilibili_ranker/resources/stopwords/)：
+停用词表放在 [resources/stopwords](src/bilibili_ranker/resources/stopwords/)：
 
 | 文件 | 用途 |
 | --- | --- |
 | `custom_stopwords.txt` | 不需要参与统计的词 |
 | `title_phrases.txt` | 在分词前去掉的完整短语，例如活动标签 |
 | `allowlist.txt` | 即使被停用词规则命中，也要保留的词 |
-
-例如，“全民制作人”可以作为活动短语过滤，但不能因此把所有标题里的“制作”都删掉；“全网首发”可以去掉，但手机发布里的“首发”仍有意义。
 
 有了历史榜单，还可以运行停用词分析：
 
@@ -115,10 +109,6 @@ python -m bilibili_ranker --output-dir analysis/current --no-fetch --aggregate -
 <summary>候选词和自动生效的条件</summary>
 
 候选词默认至少出现 7 天、覆盖 60% 的快照日，累计词频不少于 20。可以用 `--min-days`、`--min-day-ratio` 和 `--min-total` 调整。
-
-自动生效会更严格：必须属于预先列出的互动套话，历史至少有 14 个快照日，涉及至少 5 个独立视频、3 个分区，最近两期词频比在 0.5–2 之间，而且不在保留词表中。
-
-这些条件用于减少误删，并不等于机器能完全理解词义。候选报告仍值得定期检查。
 
 </details>
 
