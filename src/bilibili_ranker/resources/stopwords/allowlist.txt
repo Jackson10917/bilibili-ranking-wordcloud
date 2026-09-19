@@ -1,0 +1,25 @@
+# 容易被通用规则误删、但在 B 站标题中通常有意义的短词。
+acg
+ai
+amv
+asmr
+bgm
+c++
+c#
+cos
+cosplay
+cover
+feat
+live
+lofi
+mad
+mmd
+mv
+ost
+pv
+vlog
+vocaloid
+vr
+vs
+4k
+8k

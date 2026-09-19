@@ -1,0 +1,57 @@
+"""从已经清洗的词频表生成可复现词云。"""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Mapping
+from pathlib import Path
+
+from .fonts import resolve_font_path
+from .storage import temporary_path
+
+
+def render_wordcloud(
+    frequencies: Mapping[str, int | float],
+    output_path: str | Path,
+    *,
+    font_path: str | Path | None = None,
+    width: int = 1920,
+    height: int = 1080,
+    max_words: int = 300,
+) -> Path:
+    if not frequencies:
+        raise ValueError("词频为空，无法生成词云")
+    if width < 1 or height < 1 or max_words < 1:
+        raise ValueError("词云尺寸和最大词数必须大于 0")
+
+    try:
+        from wordcloud import WordCloud
+    except ImportError as exc:
+        raise RuntimeError("缺少 wordcloud，请先安装项目依赖") from exc
+
+    # 传入的 font_path 视为已校验（CLI 在抓取前已完成深度校验），不再重复读魔数和
+    # PIL 试载；只有未指定时才在此自动探测——缺字体是可降级的环境故障，不是参数错误。
+    resolved_font = Path(font_path) if font_path is not None else resolve_font_path()
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    cloud = WordCloud(
+        font_path=str(resolved_font),
+        background_color="white",
+        width=width,
+        height=height,
+        max_words=max_words,
+        random_state=42,
+        collocations=False,
+        prefer_horizontal=0.9,
+    )
+    cloud.generate_from_frequencies(dict(frequencies))
+    # 和 CSV 一样临时文件加 os.replace：写一半失败不会留下半截 PNG。
+    # 临时文件以 .tmp 结尾，PIL 无法从扩展名推断格式，必须显式指定 format。
+    temporary = temporary_path(destination)
+    try:
+        cloud.to_image().save(str(temporary), format="PNG")
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return destination.resolve()

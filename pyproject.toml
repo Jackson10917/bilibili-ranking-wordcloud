@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bilibili-ranking-wordcloud"
+version = "0.1.0"
+description = "抓取B站全站排行榜并生成多语言词频与词云"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = [
+  "jieba>=0.42,<1",
+  # fonts.py 直接 import PIL（校验与渲染同一条加载路径），显式声明而不靠 wordcloud 传递带入。
+  "pillow>=9,<13",
+  "requests>=2.31,<3",
+  "stopwordsiso>=0.7,<1",
+  "urllib3>=1.26,<3",
+  "wordcloud>=1.9,<2",
+]
+
+[project.urls]
+Homepage = "https://github.com/Jackson10917/bilibili-ranking-wordcloud-code"
+Issues = "https://github.com/Jackson10917/bilibili-ranking-wordcloud-code/issues"
+
+[project.scripts]
+bilibili-rank = "bilibili_ranker.cli:main"
+
+[project.optional-dependencies]
+# pytest <10 的上界含修复 PYSEC-2026-1845 的 9.0.3+。
+test = ["hypothesis>=6,<7", "pytest>=7,<10", "pytest-cov==7.1.0"]
+# numpy 是 wordcloud 经 matplotlib 带入的传递依赖，本项目代码从不 import；2.5 起的内联存根
+# 用 PEP 695 语法，mypy 按 python_version=3.10 解析会 syntax error。存根恢复兼容后移除该上限。
+lint = ["mypy==2.3.1", "numpy<2.5", "ruff==0.16.5", "types-requests==2.33.0.20260712"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+# E4/E7/E9/F 逻辑错误；W 格式卫生；I import 顺序；B 真实缺陷；UP 弃用写法。
+# S 不启用：命中全是测试 assert（S101）和 fonts.py 的 fc-match 调用（S603）。
+select = ["E4", "E7", "E9", "F", "W", "I", "B", "UP"]
+
+[tool.mypy]
+# 按最低支持版本 3.10 检查，避免只在最新 Python 上才暴露的 API 误用混进来。
+files = ["src"]
+python_version = "3.10"
+strict = true
+
+[[tool.mypy.overrides]]
+# 不发布类型存根的两个运行时依赖；jieba.lcut 的 Any 返回值由调用处 list() 包一层兜住。
+module = ["jieba", "wordcloud"]
+ignore_missing_imports = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+bilibili_ranker = [
+  "py.typed",
+  "resources/stopwords/*.txt",
+  "resources/stopwords/*.md",
+  "resources/dict/*.txt",
+]
+
+# src 布局下让裸 pytest（不经 editable 安装）也能找到包。
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+

@@ -1,0 +1,272 @@
+# B站排行榜数据与标题词云
+
+抓取B站排行榜，将榜单整理为CSV，并根据视频标题生成词云图。
+
+榜单快照、词云和分析结果保存在私有数据仓库。
+
+运行输出说明：中文按 jieba 分词，链接、BV 号、Emoji 与纯数字不入词，多语言停用词过滤后渲染。
+
+## 功能
+
+- 请求B站排行榜接口（瞬时网络故障自动重试，被风控拦截时刷新 buvid 后重试），记录数量以接口实际返回为准，支持全站榜和分区榜（`--rid`）；
+- 按BV号去重并输出CSV；
+- 提取标题片段；
+- 使用 `jieba` 进行分词；
+- 使用 `stopwordsiso` 和项目词表过滤停用词；
+- 忽略 Emoji、标点和纯符号标题；
+- 按候选文件名查找 Windows、macOS 和 Linux 字体，也可显式指定字体；
+- 正常榜单产生非空词频且字体可用时，每次成功运行新增排行榜 CSV、词频 CSV 和词云图（`--aggregate` 时词云为累计词云，时间戳词云不产出，见「跨运行聚合」）。
+
+## 环境要求
+
+- Python 3.10 或更高版本
+- 可访问B站排行榜
+
+## 安装
+
+Windows PowerShell：
+
+```
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
+
+macOS / Linux：
+
+```
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
+
+## 运行
+
+```
+bilibili-rank --output-dir output
+```
+
+也可以使用模块入口：
+
+```
+python -m bilibili_ranker --output-dir output
+```
+
+常用参数：
+
+```
+--output-dir PATH              输出目录，默认 output
+--resource-dir PATH            覆盖内置停用词资源目录，该目录必须同时包含
+                               custom_stopwords.txt 和 allowlist.txt，缺任一个直接报错退出
+--font-path PATH               指定 TTF、TTC 或 OTF 字体
+--languages zh,en,ja,ko        指定停用词语言，大小写不敏感（ZH 与 zh 等价）
+--minimum-token-length 2       普通词最短长度
+--user-dict PATH               jieba 用户词典（dict 格式），在内置热词表之上追加，
+                               游戏名、番名等专有名词不被切碎；文件不存在时在抓取前
+                               直接报错退出
+--aggregate                    合并输出目录已有词频 CSV，输出累计词频 CSV 与按累计
+                               词频渲染的词云（替代本次时间戳词云）
+--no-fetch                     不请求排行榜，只做离线的聚合重渲染或趋势分析（需与
+                               --aggregate 或 --trend 连用，单独使用按参数错误退出）
+--trend                        对比输出目录近 7 个快照日与前 7 个快照日的词频排名，
+                               输出趋势 CSV；可对比的历史不足两期时只警告不产出
+--width 1920                   词云图宽度
+--height 1080                  词云图高度
+--max-words 300                词云图最大词数
+--timeout 15                   API 请求超时秒数，取值大于 0 且不超过 86400（0、负数、
+                               inf/nan 或超大值都会直接拒绝）
+--rid 0                        排行榜分区 ID；0 为全站榜，其余为上游定义的分区 rid。
+                               常用：1 动画、3 音乐、4 游戏、5 娱乐、36 知识、
+                               119 鬼畜、129 舞蹈、155 时尚、181 影视、188 科技
+                               （对照来自社区文档，以上游实际为准）
+```
+
+## 输出
+
+正常榜单产生非空词频且字体可用时，每次成功运行会在输出目录新增三个带 UTC 时间标识的文件：
+
+```
+output/
+├─ ranking_YYYYMMDDTHHMMSSZ.csv
+├─ word_frequency_YYYYMMDDTHHMMSSZ.csv
+└─ wordcloud_YYYYMMDDTHHMMSSZ.png
+```
+
+CSV 使用 `utf-8-sig` 编码，可直接使用 Excel 打开。标题和 UP 主名称若以 `=`、`+`、`-`、`@`、Tab、CR 开头，会加单引号前缀，避免电子表格把投稿内容当公式求值。再次运行不会删除已有结果；同一秒内多次运行时，新结果会在文件名中追加 `-2`、`-3` 后缀，避免覆盖。文件名通过 `O_CREAT|O_EXCL` 原子占位，多进程并行且落在同一秒时同样不会互相覆盖。若标题清洗后没有可用词元，或词云生成失败（如缺少字体），则不产出词云图，并在失败时给出警告；有词元时词频 CSV 照常写出。
+
+词频 CSV 同为 `utf-8-sig` 编码，两列（`词`、`词频`），按词频降序排列，可导入 BI 等二次分析；词元同样做公式前缀转义。词云生成失败时词频 CSV 照常写出，只有标题清洗后没有可用词元时不产出该文件。注意单次榜单的词频里九成以上的词只出现一两次，单次快照撑不起趋势对比——跨天累计请使用 `--aggregate`。
+
+成功运行结束时向 stdout 输出一行摘要 JSON，键名为面向脚本的 ASCII：
+
+| 键 | 含义 |
+| --- | --- |
+| `fetched` | API 返回的条目数 |
+| `accepted` | 解析并去重后保留的条数 |
+| `rejected` | 解析拒绝与 BV 号重复的条数之和 |
+| `ranking_csv` | 本次排行榜 CSV 的绝对路径 |
+| `frequency_csv` | 本次词频 CSV 路径（无词元时为 `null`） |
+| `aggregate_frequency_csv` | `--aggregate` 时的累计词频 CSV 路径，否则 `null` |
+| `trend_csv` | `--trend` 时的词频趋势 CSV 路径，否则 `null`（历史不足两期时同样为 `null`） |
+| `wordcloud` | 词云 PNG 路径（降级为仅 CSV 时为 `null`） |
+
+### 数据仓库分离
+
+本项目采用双仓库架构：
+
+- **公开代码库**：https://github.com/Jackson10917/bilibili-ranking-wordcloud-code
+  - 包含所有源代码、配置文件和文档
+  - 不包含任何生成的数据文件
+
+- **私有数据仓库**：https://github.com/Jackson10917/bilibili-ranking-wordcloud-data
+  - 存储每日榜单快照（ranking_*.csv）
+  - 存储累计词频表（word_frequency_aggregate.csv）
+  - 存储词频趋势表（word_frequency_trend.csv）
+  - 存储停用词优化报告（stopword_candidates.csv）
+
+本地将两个仓库克隆到相邻目录。数据任务只在私有仓库执行，公开仓库只保留代码、静态词表和测试夹具。公开库的 `.gitignore` 不能取消已跟踪文件；本公开库从无数据的全新根提交开始，不继承旧仓库历史。
+
+```bash
+git clone https://github.com/Jackson10917/bilibili-ranking-wordcloud-data.git ../bilibili-ranking-wordcloud-data
+python -m bilibili_ranker --output-dir ../bilibili-ranking-wordcloud-data/data --aggregate --trend
+python -m bilibili_ranker stopword-analyze --data-dir ../bilibili-ranking-wordcloud-data/data --output-dir ../bilibili-ranking-wordcloud-data/analysis
+```
+
+每日任务位于私有库 `.github/workflows/daily-data.yml`，使用该仓库自己的 `GITHUB_TOKEN` 写数据，无需向公开库提供私有仓库令牌。每天北京时间 09:00 运行，也可在私有库 Actions 手动触发。任务先取完整历史，再抓榜、优化并提交；只保留一个定时入口。
+
+### 跨运行聚合（--aggregate）
+
+单次榜单约 100 条标题，词频分布接近噪声（最高频词也只出现 4 次左右），词云字号编码不出有效信息；把每天的时间戳词频 CSV 攒起来、按词求和之后，分布才开始收敛。加 `--aggregate` 运行时，本次把输出目录里全部时间戳形态的 `word_frequency_*.csv`（含本次刚写出的与 `-2` 跳号变体）按词求和；同一 UTC 日期存在多份快照时只取最新一份——同一天补跑不会把当天词频计两次，早跑独有、补跑时已下榜的词也不会计入当天。注意累计的统计口径：同一视频连续 N 天在榜，其标题词元就被计 N 次——累计词频衡量的是「词 × 在榜天数」，不是「出现过该词的独立视频数」。在榜时长本身是热度信号，通常正是想要的加权；按独立视频去重的口径本工具不提供。备份或改名的产物（如 `word_frequency_aggregate-2.csv`）不匹配时间戳白名单，不会被并进来重复累计。产出两个固定名文件并原子覆盖——是滚动累计快照，不是逐日归档，逐日数据就是目录里的时间戳词频 CSV 本身。带时间戳的排行榜 CSV 与词频 CSV 照常落盘；时间戳词云不再产出，由按累计词频渲染的词云替代：
+
+```
+output/
+├─ word_frequency_aggregate.csv   # 累计词频，按词频降序
+└─ wordcloud_aggregate.png        # 按累计词频渲染的词云；字体缺失时同样降级为仅 CSV + 警告
+```
+
+聚合产物自身会从合并范围中排除，连续运行不会重复累计。聚合以输出目录为单位：不同分区（`--rid`）请使用不同的 `--output-dir`，同一个目录混用多个 rid 会把分区混在一起累计。
+
+加 `--no-fetch` 时本次不请求接口、不写时间戳产物，只对目录里已有的词频 CSV 重新聚合并重渲染累计词云——换字体、调尺寸、重出图不再要求联网再抓一次榜；输出目录还没有任何词频 CSV 时只警告不报错。此时摘要里 `fetched`/`accepted`/`rejected` 为 0，`ranking_csv`/`frequency_csv` 为 `null`。
+
+私有仓库保留 `data/` 原始快照和当时生成的词频、累计、趋势文件。`analysis/baseline/` 按当前内置词表重算全部原始标题，`analysis/current/` 再应用自动停用词层，提供口径一致的逐日词频、累计词频、趋势表及累计词云。自动层变化不会改写原始快照；每天都会重算历史派生结果，避免旧词表污染累计结果。
+
+若接口返回成功但整榜记录全部无法解析（例如上游字段变更），退出码为 1，同时仍写出只含表头的 CSV 便于排查——自动化任务不会把这种情况误判为成功。
+
+### 词频趋势（--trend）
+
+词云只编码「词频」一个维度，回答不了「什么在变」；加 `--trend` 时把目录里的时间戳词频 CSV 按快照日切成两窗——近 7 个快照日对比再往前 7 个（同一日期仍只取最新一份，`-2` 跳号与备份/改名产物同样不参与）——输出排名变化表：
+
+```
+output/
+└─ word_frequency_trend.csv      # 固定名滚动快照，原子覆盖
+```
+
+列为 `词`、`状态`、`上期排名`、`上期词频`、`本期排名`、`本期词频`、`排名变化`：排名是词频降序的位次，`排名变化` 为上期位次减本期位次（正值上升），`状态` 取 新进（上期缺席）、掉出（本期缺席）或 上升/下降/持平。行序按本期词频降序，掉出词垫底、沿用上期词频降序，缺席侧的单元格留空。两窗对称过滤，只收窗内总词频不低于 2 的词：只出现一次的词是一大片并列词频，位次由文件读入顺序决定，写进表里等于把插入产物当测量值。窗口按快照日数而不是日历天切，上游断更时窗口顺延；可对比的历史不足两期（快照日不足 8 天）时没有可比对象，只警告不产出文件——全「新进」的表只是当天词频的换皮，不值得落盘。可与 `--aggregate` 同跑（日更工作流即 `--aggregate --trend`），也可与 `--no-fetch` 连用做纯离线分析。
+
+### 退出码
+
+| 码 | 含义 |
+| --- | --- |
+| 0 | 成功（含「只输出 CSV」的降级情况） |
+| 1 | 运行期失败：网络/风控、整榜解析失败、语言代码不被支持、`--resource-dir` 缺文件、显式指定的字体（`--font-path`/环境变量）不可用、`--user-dict` 文件不可读 |
+| 2 | argparse 参数格式错误：未知参数、类型不符、`--timeout`/`--width`/`--height`/`--max-words`/`--minimum-token-length`/`--rid` 取值越界、`--no-fetch` 未与 `--aggregate` 连用 |
+| 130 | Ctrl+C 中断 |
+
+注意 `--languages zh,xx`、`--resource-dir` 缺文件与显式指定的字体不可用，同属「值有效但资源不可用」，在流程内报错，退出码是 1 而非 2。显式指定的字体在发起抓取之前就完成校验，失败时不会写任何文件。
+
+## CSV 字段
+
+| 表头 | 含义 |
+| --- | --- |
+| 排名 | 本次榜单顺序（去重后可能不连续） |
+| BV号 | 视频BV号 |
+| 视频链接 | B站视频页面链接 |
+| 视频标题 | 视频标题原文 |
+| 视频分区 | 视频所属细分分区 |
+| 主分区 | 视频所属上级分区 |
+| UP主 | 投稿账号名称 |
+| 发布时间（北京时间） | 视频发布时间，格式为 `YYYY-MM-DD HH:MM:SS` |
+| 视频时长（秒） | 视频总时长 |
+| 播放量 | 视频播放次数 |
+| 弹幕数 | 弹幕数量 |
+| 评论数 | 评论数量 |
+| 收藏数 | 收藏数量 |
+| 投币数 | 投币数量 |
+| 分享数 | 分享数量 |
+| 点赞数 | 点赞数量 |
+
+词频 CSV 的表头：
+
+| 表头 | 含义 |
+| --- | --- |
+| 词 | 分词并过滤后的词元（英文经 casefold 归一化，输出全小写） |
+| 词频 | 该词元在本次榜单全部标题中的出现次数 |
+
+## 标题处理
+
+标题首先进行 Unicode NFKC 归一化、剔除零宽等不可见字符（`Cf` 类）并压缩空白，避免「防和谐」标题里插入的零宽空格把词拆碎。随后剥除链接和 BV 号，避免 `https`、`b23.tv`、`video`、`bv1xx411c7md` 这类标识符片段进入词云。剥除范围包括 `http(s)://…`、`www.…`，以及标题里常见的无协议裸链；域名剥除带左边界，`xbilibili.com` 这类粘连前缀不会剥出 `x` 碎片。域名采用显式名单——B站自家 `b23.tv`、`bilibili.com`（含子域名），及 youtube、微博、抖音、小红书、知乎、niconico 等常见导流源。域名不通配 TLD，避免误伤 `3.5`、`vs.` 这类正常词元；名单外的域名出现噪声时往 `_NOISY_DOMAINS` 加一行即可。中文使用 `jieba` 分词；其他语言按连续字符片段提取。jieba 通用词典不含新出的游戏/番剧名，项目内置热词表（`resources/dict/user_dict.txt`，随包分发、默认加载）保证 `崩坏：星穹铁道` 这类高频专名不被切碎；更多专名用 `--user-dict` 追加。未列出的文字系统不会进入词频。
+
+默认加载以下语言：
+
+```
+zh, en, ja, ko, fr, de, es, ru
+```
+
+项目停用词位于 `custom_stopwords.txt`，需要保留的短词位于 `allowlist.txt`。保留词优先于基础停用词和项目停用词。
+
+`stopword-analyze`（别名 `stopword-candidates`）使用与抓取流程相同的分词器；同一 UTC 日期只取最新快照，同一快照按 BV 号去重。参数 `--min-days`（默认 7）、`--min-day-ratio`（默认 0.6）、`--min-total`（默认 20）均实际参与筛选。旧的 `--max-day-ratio` 已移除：高持续度筛选应设置下限。
+
+输出 `analysis/stopword_candidates.csv`、`auto_stopwords.txt` 和 `stopword_summary.json`。候选报告包含独立视频数、分区数、累计词频、前后 7 日趋势与标题示例，只在私有库保存。自动生效还要求：词属于代码中明确的互动套话集合，至少 14 个快照日、5 个独立视频、3 个分区，两期词频比在 0.5–2 之间，且不在保留词表。普通高频词、热点词、下降或掉出词不会仅凭统计自动删除。
+
+自动词表每次完整重算，证据不足的词会自动退出。原始标题始终作为输入，避免「过滤后看不见该词」导致自我反馈。统计只能提供候选证据，不能保证语义分类完全正确；需要扩大自动分类范围时，审查 `stopword_optimizer.py` 的套话集合即可。
+
+Emoji、标点及其他符号不参与词频统计。标题中只有 Emoji 或符号时，该标题不会向词云图提供词元。纯数字词元（如年份 2024）同样不参与词频统计。英文词元按 casefold 归一化，以正确匹配停用词表并聚合同形词（`MMD` 与 `mmd` 计为一个词），词频 CSV 和词云里因此输出全小写（`MMD` 显示为 `mmd`）。
+
+## 字体
+
+字体文件按以下顺序查找：
+
+1. `--font-path` 指定的字体；
+2. 环境变量 `BILIBILI_WORDCLOUD_FONT`；
+3. 系统中的 Noto Sans CJK、思源黑体、微软雅黑、黑体、苹方或文泉驿字体；
+4. Linux `fontconfig` 返回的字体。
+
+Linux 推荐安装 Noto Sans CJK。仓库不包含专有字体文件。显式指定的字体（`--font-path` 或 `BILIBILI_WORDCLOUD_FONT`）会校验后缀与 sfnt 容器魔数，并用 PIL 试载做深度校验；校验在抓取开始前完成，路径错误或内容损坏直接退出码 1，不会先抓完榜单再降级。自动探测失败则按可降级的环境问题处理：只输出 CSV 并给出警告。自动查找只按候选文件名在标准字体目录顶层命中，不递归子目录（家目录可能是网络盘）；嵌套安装的字体（如 Debian 系 `fonts-noto-cjk` 装在 `opentype/noto/` 下）由 fontconfig 兜底，没有 fontconfig 的环境请改用 `--font-path`。自动查找只确认候选字体文件存在，不检查完整字形覆盖，若词云出现缺字，请使用 `--font-path` 指定包含所需字符的字体。
+
+`.ttc` 是字体集合容器，内部按语言分多个 face。`wordcloud` 调用 PIL 时不传 `index`，恒取 face 0——`NotoSansCJK-Regular.ttc` 的 face 0 是日文，简体汉字会以日文字形变体渲染（如「直」「骨」的写法差异），不是缺字。候选列表已把单体 `NotoSansCJKsc-Regular.otf` 排在 `.ttc` 之前；Debian 系的 `fonts-noto-cjk` 只提供 `.ttc`，若在意字形，用 `--font-path` 指定单体 SC 字体（`NotoSansSC-Regular.otf` 等）。
+
+## 环境变量
+
+| 变量 | 作用 |
+| --- | --- |
+| `BILIBILI_WORDCLOUD_FONT` | 指定词云字体路径，优先级低于 `--font-path` |
+| `BILIBILI_UA` | 覆盖请求排行榜接口使用的 User-Agent，浏览器版本过时时无需改代码 |
+
+## 数据来源
+
+排行榜页面：<https://www.bilibili.com/v/popular/rank/all>
+
+项目使用的公开接口：
+
+```
+https://api.bilibili.com/x/web-interface/ranking/v2?rid=0&type=all
+```
+
+`--rid` 把查询串里的 `rid` 换成对应分区 ID 即为分区榜（默认 0 全站）。分区 ID 的取值集合由上游接口定义，本项目只做透传；接口对某个 rid 返回空榜或错误时，工具会如实报错退出（退出码 1），不会回退到全站榜。
+
+## 已知边界
+
+- 默认 User-Agent 是写死的现代 Chrome 指纹，会随浏览器版本演进而过时。请求被风控拦截且重试无效时，优先尝试用 `BILIBILI_UA` 覆盖为当前浏览器版本。
+- 风控处理建立在 ranking v2 接口当前不需要 WBI 签名的行为上：`-352`/HTTP 412 时刷新 buvid cookie 重试。上游一旦对接口加签，这条路会失效，届时需要实现 WBI 签名。
+- 本项目面向日更粒度的榜单，例行任务每天一次足够。请自行控制抓取频率，不要高频轮询，使用时遵守 B 站的用户协议。
+
+## 许可证
+
+本项目使用 [MIT License](LICENSE)。
+
+
+精确短语停用规则位于 `title_phrases.txt`，在分词前应用；外部 `--resource-dir` 可选提供此文件。
+活动标签按完整短语处理，保留 AI、歌曲名称，以及正常语境里的制作、计划、全民、扶持、小曲。
+优化器先暂存完整结果，再逐文件原子替换；生成失败保留旧结果，正常完成时只删除本工具的过期派生文件。
+单独运行优化命令会移除旧累计词云，随后用 `--no-fetch --aggregate --trend` 重绘，避免图表与词表版本不一致。

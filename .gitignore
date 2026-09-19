@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.hypothesis/
+.ruff_cache/
+.idea/
+.venv/
+venv/
+dist/
+build/
+.DS_Store
+Thumbs.db
+.coverage
+# ponytail 债务台账只保留在本地，不入库。
+PONYTAIL-DEBT.md
+# 数据文件（提交到私有仓库）
+data/
+output/
+
+.mypy_cache/
+analysis/

@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  # push 只收 main：否则同仓库 PR 会同时触发 push 和 pull_request，7 个 job 白跑两遍。
+  # concurrency 拦不住这种重复——两类事件的 github.ref 不同（refs/heads/x vs
+  # refs/pull/N/merge），group 不同就不会互相取消。
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一分支/PR 连续推送时取消上一轮未跑完的 job。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# 第三方 action 的 tag 可以被移动重指到别的 commit；钉死发布版的 commit SHA（注释为版本号），
+# 升级时手动换行。
+# 只拉代码跑测试，不需要任何写权限；显式收窄避免默认 token 权限过大。
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      # 矩阵只保留有信号的组合：版本差异集中在两端，ubuntu 跑最低 3.10 与最新 3.14
+      # 两个端点；3.10 再配一次 Windows（importlib.abc 兜底路径 × 平台差异）、
+      # 3.14 配一次 macOS（字体目录探测的平台分支）。中间版本不新增有效信息。
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.10"
+          - os: ubuntu-latest
+            python-version: "3.14"
+          - os: windows-latest
+            python-version: "3.10"
+          - os: macos-latest
+            python-version: "3.14"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      # 没有 CJK 字体，test_wordcloud_renders_real_png 会 skip，真实 PNG 保存路径零覆盖。
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+      - run: python -m pip install -e ".[test]"
+      - run: python -m pytest tests
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      # 版本钉在 pyproject 的 lint extra，本地与 CI 用同一个 ruff。
+      - run: python -m pip install -e ".[lint]"
+      - name: Keep generated data out of the public repository
+        run: |
+          files=$(git ls-files data output analysis assets '*.csv' '*.png')
+          if [ -n "$files" ]; then
+            echo "Generated data must stay in the private data repository."
+            exit 1
+          fi
+      - run: ruff check .
+      - run: ruff format --diff .
+
+  # 注解必须被静态验证，否则会随代码腐烂而无人察觉；按最低支持版本 3.10 检查（见
+  # pyproject 的 [tool.mypy]），避免只在最新 Python 上才暴露的 API 误用混进主干。
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      # mypy/types-requests 同样钉在 lint extra，本地与 CI 版本一致。
+      - run: python -m pip install -e ".[lint]"
+      - run: python -m mypy
+
+  # 覆盖率门禁只防大幅回退：当前实测约 94%，阈值 90 不锁小抖动（字体探测分支按平台
+  # 有差异）；跌破 90 意味着重构吞掉了成片的测试路径，必须补齐而不是调阈值。
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      # 与 test 矩阵同装 CJK 字体，避免真实 PNG 测试 skip 造成覆盖率虚低。
+      - run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+      - run: python -m pip install -e ".[test]"
+      - run: python -m pytest tests --cov=bilibili_ranker --cov-report=term-missing --cov-fail-under=90
