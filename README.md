@@ -111,30 +111,6 @@ CSV 使用 `utf-8-sig` 编码，可直接使用 Excel 打开。标题和 UP 主�
 | `trend_csv` | `--trend` 时的词频趋势 CSV 路径，否则 `null`（历史不足两期时同样为 `null`） |
 | `wordcloud` | 词云 PNG 路径（降级为仅 CSV 时为 `null`） |
 
-### 数据仓库分离
-
-本项目采用双仓库架构：
-
-- **公开代码库**：https://github.com/Jackson10917/bilibili-ranking-wordcloud-code
-  - 包含所有源代码、配置文件和文档
-  - 不包含任何生成的数据文件
-
-- **私有数据仓库**：https://github.com/Jackson10917/bilibili-ranking-wordcloud-data
-  - 存储每日榜单快照（ranking_*.csv）
-  - 存储累计词频表（word_frequency_aggregate.csv）
-  - 存储词频趋势表（word_frequency_trend.csv）
-  - 存储停用词优化报告（stopword_candidates.csv）
-
-本地将两个仓库克隆到相邻目录。数据任务只在私有仓库执行，公开仓库只保留代码、静态词表和测试夹具。公开库的 `.gitignore` 不能取消已跟踪文件；本公开库从无数据的全新根提交开始，不继承旧仓库历史。
-
-```bash
-git clone https://github.com/Jackson10917/bilibili-ranking-wordcloud-data.git ../bilibili-ranking-wordcloud-data
-python -m bilibili_ranker --output-dir ../bilibili-ranking-wordcloud-data/data --aggregate --trend
-python -m bilibili_ranker stopword-analyze --data-dir ../bilibili-ranking-wordcloud-data/data --output-dir ../bilibili-ranking-wordcloud-data/analysis
-```
-
-每日任务位于私有库 `.github/workflows/daily-data.yml`，使用该仓库自己的 `GITHUB_TOKEN` 写数据，无需向公开库提供私有仓库令牌。每天北京时间 09:00 运行，也可在私有库 Actions 手动触发。任务先取完整历史，再抓榜、优化并提交；只保留一个定时入口。
-
 ### 跨运行聚合（--aggregate）
 
 单次榜单约 100 条标题，词频分布接近噪声（最高频词也只出现 4 次左右），词云字号编码不出有效信息；把每天的时间戳词频 CSV 攒起来、按词求和之后，分布才开始收敛。加 `--aggregate` 运行时，本次把输出目录里全部时间戳形态的 `word_frequency_*.csv`（含本次刚写出的与 `-2` 跳号变体）按词求和；同一 UTC 日期存在多份快照时只取最新一份——同一天补跑不会把当天词频计两次，早跑独有、补跑时已下榜的词也不会计入当天。注意累计的统计口径：同一视频连续 N 天在榜，其标题词元就被计 N 次——累计词频衡量的是「词 × 在榜天数」，不是「出现过该词的独立视频数」。在榜时长本身是热度信号，通常正是想要的加权；按独立视频去重的口径本工具不提供。备份或改名的产物（如 `word_frequency_aggregate-2.csv`）不匹配时间戳白名单，不会被并进来重复累计。产出两个固定名文件并原子覆盖——是滚动累计快照，不是逐日归档，逐日数据就是目录里的时间戳词频 CSV 本身。带时间戳的排行榜 CSV 与词频 CSV 照常落盘；时间戳词云不再产出，由按累计词频渲染的词云替代：
