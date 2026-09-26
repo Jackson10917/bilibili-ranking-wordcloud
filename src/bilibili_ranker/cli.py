@@ -163,12 +163,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_analyze = subparsers.add_parser(
         "stopword-analyze", aliases=["stopword-candidates"], help="分析历史并更新私有自动停用词表"
     )
-    p_analyze.add_argument("--data-dir", type=Path, default=Path("data"))
+    p_analyze.add_argument(
+        "--data-dir", type=Path, default=Path("data"), help="原始榜单快照目录（默认：data）"
+    )
     # SUPPRESS：子命令默认值会覆盖写在子命令前的全局 --output-dir，静默丢掉用户给的目录。
-    p_analyze.add_argument("--output-dir", type=Path, default=argparse.SUPPRESS)
-    p_analyze.add_argument("--min-days", type=int, default=7)
-    p_analyze.add_argument("--min-day-ratio", type=float, default=0.3)
-    p_analyze.add_argument("--min-uploaders", type=int, default=5)
+    p_analyze.add_argument(
+        "--output-dir",
+        type=Path,
+        default=argparse.SUPPRESS,
+        help="分析结果与 stopword_decisions.csv 所在目录（默认：output）",
+    )
+    p_analyze.add_argument(
+        "--min-days", type=int, default=7, help="候选词至少出现的快照天数（默认：7）"
+    )
+    p_analyze.add_argument(
+        "--min-day-ratio", type=float, default=0.3, help="候选词至少覆盖的快照日比例（默认：0.3）"
+    )
+    p_analyze.add_argument(
+        "--min-uploaders", type=int, default=5, help="候选词至少被多少个不同 UP 主用过（默认：5）"
+    )
 
     # 主命令参数
     parser.add_argument("--output-dir", type=Path, default=Path("output"), help="输出目录")
