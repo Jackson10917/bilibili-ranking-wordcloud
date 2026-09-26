@@ -105,17 +105,9 @@ python -m bilibili_ranker stopword-analyze --data-dir output --output-dir analys
 
 1. **程序推荐候选词。** 被很多不同 UP 主用过、出现在很多分区、连续好多天都有的词，会进入候选表 `analysis/stopword_candidates.csv`。
 2. **把握很大的词自动过滤。** 像「这种」「到底」这样本身没有实际意思的词，如果在各个分区都用得差不多、最近两周出现的次数也稳定，analysis会直接把它过滤掉。
-3. **其他的你来决定。** 打开候选表检查，把决定写进 `analysis/stopword_decisions.csv`（第一次运行时会自动创建）：
+3. **其他的你来决定。** 检查候选表，在 `analysis/stopword_decisions.csv` 里每行写一个词和决定，比如 `可能,停用` 或 `挑战,保留`。「停用」以后一直过滤，「保留」以后不再推荐。
 
-   ```csv
-   词,决定,备注
-   可能,停用,
-   挑战,保留,是内容不是套话
-   ```
-
-   「停用」的词以后一直被过滤；「保留」的词不再推荐，也不会被自动过滤。
-
-   `stopword_decisions.csv` 就是你自己的 B 站停用词表，程序只会读它，不会改它。候选表每次运行都会重新生成，不要在候选表里写决定。用 Excel 编辑的话，保存时请选「CSV UTF-8」格式，否则中文会乱码。
+   `stopword_decisions.csv` 就是你自己的 B 站停用词表，程序只会读它，不会改它。用 Excel 编辑时请另存为「CSV UTF-8」，否则中文会乱码。
 
 分析完成后，`analysis` 文件夹里有：
 
