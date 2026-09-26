@@ -161,3 +161,12 @@ def test_zero_pubdate_is_missing_not_1970() -> None:
         rank=1,
     )
     assert normal.published_at == "2024-01-01 08:00:00"
+
+
+def test_boolean_stats_are_rejected_not_counted_as_one() -> None:
+    # bool 是 int 的子类：不单独拦下，True 会被悄悄记成播放量 1。
+    records, rejected = parse_ranking_records(
+        [{"bvid": "BV1aa0000000", "title": "标题", "stat": {"view": True, "like": 3}}]
+    )
+    assert rejected == 0
+    assert records[0].view_count is None and records[0].like_count == 3

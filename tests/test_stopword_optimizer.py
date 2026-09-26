@@ -222,3 +222,39 @@ def test_locked_destination_leaves_outputs_untouched(tmp_path, monkeypatch):
     with pytest.raises(PermissionError):
         optimize_stopwords(tmp_path, output)
     assert before == {p: p.read_bytes() for p in output.rglob("*") if p.is_file()}
+
+
+# 每个场景只让一个自动生效条件不满足：条件一旦被删，对应场景就会误把词自动过滤。
+# 其余日子用「原神 ai」垫底（专名 + 保留词），不会产生别的候选。
+@pytest.mark.parametrize(
+    ("days", "title_for_day", "word"),
+    [
+        # 词频不稳定：前 7 天每天都有，后 7 天完全消失。
+        (14, lambda day: "这种 原神" if day <= 7 else "原神 ai", "这种"),
+        # 不是虚词：「挑战」分布、稳定性都与「这种」相同，但有实际意思。
+        (14, lambda day: "挑战 原神", "挑战"),
+        # 数据不足 14 天：13 天里天天稳定出现。
+        (13, lambda day: "这种 原神", "这种"),
+    ],
+)
+def test_auto_filter_requires_every_condition(tmp_path, days, title_for_day, word):
+    for day in range(1, days + 1):
+        _snapshot(tmp_path / f"ranking_202601{day:02d}T000000Z.csv", title_for_day(day))
+    result = optimize_stopwords(tmp_path, tmp_path / "analysis")
+    assert word not in result["automatic_words"]
+    current = (tmp_path / "analysis/current/word_frequency_aggregate.csv").read_text(
+        encoding="utf-8-sig"
+    )
+    assert f"\n{word}," in current
+
+
+def test_low_day_ratio_is_not_a_candidate(tmp_path):
+    # 30 天里只有 7 天出现（23% < 30%）：出现天数够 7 天，但覆盖率不够，不该进候选表。
+    for day in range(1, 31):
+        _snapshot(
+            tmp_path / f"ranking_202601{day:02d}T000000Z.csv",
+            "这种 原神" if day % 4 == 0 else "原神 ai",
+        )
+    optimize_stopwords(tmp_path, tmp_path / "analysis")
+    with (tmp_path / "analysis/stopword_candidates.csv").open(encoding="utf-8-sig") as stream:
+        assert "这种" not in [row["词"] for row in csv.DictReader(stream)]
