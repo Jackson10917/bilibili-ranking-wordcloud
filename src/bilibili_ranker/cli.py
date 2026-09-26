@@ -157,8 +157,8 @@ def build_parser() -> argparse.ArgumentParser:
     # SUPPRESS：子命令默认值会覆盖写在子命令前的全局 --output-dir，静默丢掉用户给的目录。
     p_analyze.add_argument("--output-dir", type=Path, default=argparse.SUPPRESS)
     p_analyze.add_argument("--min-days", type=int, default=7)
-    p_analyze.add_argument("--min-day-ratio", type=float, default=0.6)
-    p_analyze.add_argument("--min-total", type=int, default=20)
+    p_analyze.add_argument("--min-day-ratio", type=float, default=0.3)
+    p_analyze.add_argument("--min-uploaders", type=int, default=5)
 
     # 主命令参数
     parser.add_argument("--output-dir", type=Path, default=Path("output"), help="输出目录")
@@ -353,7 +353,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.output_dir,
                 min_days=args.min_days,
                 min_day_ratio=args.min_day_ratio,
-                min_total=args.min_total,
+                min_uploaders=args.min_uploaders,
             )
         else:
             summary = run_pipeline(args)

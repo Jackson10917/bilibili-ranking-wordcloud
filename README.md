@@ -89,17 +89,30 @@ python -m bilibili_ranker --output-dir output --no-fetch --aggregate --trend
 python -m bilibili_ranker stopword-analyze --data-dir output --output-dir analysis
 ```
 
-它会从原始标题重新统计，生成候选报告，并把符合条件的互动套话加入独立的自动词表。普通高频词不会仅因为出现得多、排名下降或退出榜单就被删除。
+它会从原始标题重新统计，找出「不随热点变化、到处都在用」的词，慢慢攒成一份 B 站专用停用词库：
+
+1. **机器提名**：很多不同 UP 主在用、分布在很多分区、连续多天出现的词进入候选表。同一个视频连续在榜只算一次；人名、地名、游戏名等专名不会被提名。
+2. **强证据自动生效**：候选词如果是代词、副词这类虚词，分区分布均匀，最近两周词频也稳定，就自动加入停用词。
+3. **其余由你决定**：看候选表，把决定写进 `analysis/stopword_decisions.csv`（第一次运行时会自动创建）：
+
+   ```csv
+   词,决定,备注
+   可能,停用,
+   挑战,保留,是内容不是套话
+   ```
+
+   填「停用」的词以后都会被过滤；填「保留」的词不会再被提名，也不会被自动停用。想撤回自动生效的词，也是标「保留」。程序只读这个文件，不会改写它。
 
 | 输出位置 | 内容 |
 | --- | --- |
-| `analysis/stopword_candidates.csv` | 候选词、统计依据和标题示例 |
+| `analysis/stopword_candidates.csv` | 待审核的候选词、统计依据和标题示例，越靠前越像套话 |
+| `analysis/stopword_decisions.csv` | 你的决定，就是你自己的 B 站停用词库 |
 | `analysis/auto_stopwords.txt` | 本轮自动生效的停用词 |
 | `analysis/stopword_summary.json` | 分析参数与结果摘要 |
-| `analysis/baseline/` | 按当前内置词表重算的词频与趋势 |
-| `analysis/current/` | 应用自动词表后的词频与趋势，日常查看这里即可 |
+| `analysis/baseline/` | 按内置词表重算的词频与趋势 |
+| `analysis/current/` | 去掉人工停用词和自动停用词后的词频与趋势，日常查看这里即可 |
 
-自动词表每次都会重新评估，不再符合条件的词会退出。原始榜单保持不变。分析完成后，可以再生成一张使用新规则的词云：
+自动停用词每次都会重新评估，不再符合条件的词会退出。原始榜单保持不变。分析完成后，可以再生成一张使用新规则的词云：
 
 ```bash
 python -m bilibili_ranker --output-dir analysis/current --no-fetch --aggregate --trend
@@ -108,7 +121,11 @@ python -m bilibili_ranker --output-dir analysis/current --no-fetch --aggregate -
 <details>
 <summary>候选词和自动生效的条件</summary>
 
-候选词默认至少出现 7 天、覆盖 60% 的快照日，累计词频不少于 20。可以用 `--min-days`、`--min-day-ratio` 和 `--min-total` 调整。
+候选词默认至少出现 7 天、覆盖 30% 的快照日，并且至少有 5 个不同 UP 主用过。可以用 `--min-days`、`--min-day-ratio` 和 `--min-uploaders` 调整。
+
+自动生效还要同时满足：词性全是代词、副词、连词、介词、助词、语气词、叹词、拟声词或量词；累计至少 14 个快照日；有效分区数不少于 3（相当于均匀分布在 3 个以上分区）；最近 7 天与之前 7 天的词频比在 0.5–2 之间；不在保留词表里，也没有被你标为「保留」。
+
+统计只能判断「像不像套话」，判断不了词义，所以名词、动词这类实词一律留给你决定。
 
 </details>
 

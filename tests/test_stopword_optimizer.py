@@ -1,4 +1,4 @@
-"""自动层的关键边界：按日去重、同一视频驻榜、保护词、趋势与失败退出。"""
+"""停用词分析的关键边界：按日去重、同一视频驻榜、专名与保留词、人工决定、趋势与失败退出。"""
 
 import csv
 from pathlib import Path
@@ -9,7 +9,7 @@ from bilibili_ranker.cli import main
 from bilibili_ranker.stopword_optimizer import optimize_stopwords
 
 
-def _snapshot(path: Path, title: str = "三连 ai 原神", *, diverse: bool = True) -> None:
+def _snapshot(path: Path, title: str = "这种 ai 原神", *, diverse: bool = True) -> None:
     with path.open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.writer(stream)
         writer.writerow(["BV号", "视频标题", "主分区"])
@@ -19,9 +19,7 @@ def _snapshot(path: Path, title: str = "三连 ai 原神", *, diverse: bool = Tr
             writer.writerow([bvid, title, f"分区{index % 3}"])
 
 
-def test_optimizer_applies_only_stable_noise_and_recomputes(tmp_path, monkeypatch):
-    import bilibili_ranker.stopword_optimizer as optimizer
-
+def test_optimizer_applies_only_stable_function_words_and_recomputes(tmp_path):
     data = tmp_path / "data"
     data.mkdir()
     output = tmp_path / "analysis"
@@ -30,13 +28,15 @@ def test_optimizer_applies_only_stable_noise_and_recomputes(tmp_path, monkeypatc
     # 同秒后缀 10 比 2 新；一天三份不能重复计数或按字典序取旧文件。
     _snapshot(data / "ranking_20260114T000000Z-2.csv", "过时标题")
     _snapshot(data / "ranking_20260114T000000Z-10.csv")
-    monkeypatch.setattr(optimizer, "_AUTO_NOISE", frozenset({"三连", "ai"}))
     result = optimize_stopwords(data, output)
+    # 这种=代词、跨 3 分区均匀、两窗稳定 → 自动；原神=专名、ai=保留词 → 永不提名。
     assert result["snapshot_days"] == 14
-    assert result["automatic_words"] == ["三连"]
+    assert result["automatic_words"] == ["这种"]
+    with (output / "stopword_candidates.csv").open(encoding="utf-8-sig", newline="") as stream:
+        assert [row["词"] for row in csv.DictReader(stream)] == ["这种"]
     baseline = (output / "baseline/word_frequency_aggregate.csv").read_text(encoding="utf-8-sig")
     current = (output / "current/word_frequency_aggregate.csv").read_text(encoding="utf-8-sig")
-    assert "三连,84" in baseline and "三连," not in current
+    assert "这种,84" in baseline and "这种," not in current
     assert "原神,84" in current and "ai,84" in current
     assert "过时" not in baseline
     assert (output / "current/word_frequency_trend.csv").is_file()
@@ -49,14 +49,14 @@ def test_optimizer_applies_only_stable_noise_and_recomputes(tmp_path, monkeypatc
                 str(data),
                 "--output-dir",
                 str(output),
-                "--min-total",
+                "--min-uploaders",
                 "999",
             ]
         )
         == 0
     )
-    assert "三连" not in (output / "auto_stopwords.txt").read_text(encoding="utf-8")
-    assert "三连,84" in (output / "current/word_frequency_aggregate.csv").read_text(
+    assert "这种" not in (output / "auto_stopwords.txt").read_text(encoding="utf-8")
+    assert "这种,84" in (output / "current/word_frequency_aggregate.csv").read_text(
         encoding="utf-8-sig"
     )
     assert all(path.read_bytes() == content for path, content in original.items())
@@ -71,7 +71,7 @@ def test_optimizer_applies_only_stable_noise_and_recomputes(tmp_path, monkeypatc
 def test_repeated_video_does_not_qualify(tmp_path):
     for day in range(1, 15):
         _snapshot(tmp_path / f"ranking_202601{day:02d}T000000Z.csv", diverse=False)
-    result = optimize_stopwords(tmp_path, tmp_path / "analysis", min_total=1)
+    result = optimize_stopwords(tmp_path, tmp_path / "analysis")
     assert result["automatic_words"] == []
 
 
@@ -87,7 +87,7 @@ def test_bad_snapshot_does_not_replace_previous_outputs(tmp_path, contents):
 
 
 def test_invalid_options_and_missing_history(tmp_path):
-    for options in ({"min_days": 0}, {"min_total": 0}, {"min_day_ratio": 1.1}):
+    for options in ({"min_days": 0}, {"min_uploaders": 0}, {"min_day_ratio": 1.1}):
         with pytest.raises(ValueError):
             optimize_stopwords(tmp_path, tmp_path / "analysis", **options)
     for data, output in (
@@ -130,11 +130,27 @@ def test_generation_failure_preserves_outputs_and_unrelated_files(tmp_path, monk
     assert not list(tmp_path.glob(".stopword-*"))
 
 
-def test_multiword_noise_can_actually_be_learned(tmp_path):
+def test_manual_decisions_are_remembered(tmp_path):
+    # 人工决定表：停用 → 从 current 去掉且不再提名；保留 → 不再提名、永不自动生效。
+    data = tmp_path / "data"
+    data.mkdir()
     for day in range(1, 15):
-        _snapshot(tmp_path / f"ranking_202601{day:02d}T000000Z.csv", "感谢观看 原神")
-    result = optimize_stopwords(tmp_path, tmp_path / "analysis")
-    assert result["automatic_words"] == ["感谢观看"]
+        _snapshot(data / f"ranking_202601{day:02d}T000000Z.csv", "这种 挑战 原神")
+    output = tmp_path / "analysis"
+    optimize_stopwords(data, output)
+    decisions = output / "stopword_decisions.csv"
+    assert decisions.read_text(encoding="utf-8-sig") == "词,决定,备注\n"  # 缺失时建模板
+    decisions.write_text("词,决定,备注\n挑战,停用,\n这种,保留,误伤\n", encoding="utf-8-sig")
+    result = optimize_stopwords(data, output)
+    assert result["automatic_words"] == [] and result["candidates"] == 0
+    assert (result["manual_stopwords"], result["reviewed_keep"]) == (1, 1)
+    current = (output / "current/word_frequency_aggregate.csv").read_text(encoding="utf-8-sig")
+    assert "挑战," not in current and "这种,84" in current
+    assert decisions.read_text(encoding="utf-8-sig").endswith("误伤\n")  # 工具从不改写
+    for bad in ("词,决定\n挑战,删掉\n", "词,决定\n挑战,停用\n挑战,保留\n", "词\n挑战\n"):
+        decisions.write_text(bad, encoding="utf-8-sig")
+        with pytest.raises(ValueError):
+            optimize_stopwords(data, output)
 
 
 def test_header_only_snapshot_is_skipped_not_fatal(tmp_path, capsys):
