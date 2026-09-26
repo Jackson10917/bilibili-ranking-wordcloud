@@ -525,3 +525,9 @@ def test_optional_title_phrase_file_respects_exact_allowlist(tmp_path):
     (tmp_path / "title_phrases.txt").write_text("testphrase\nremovephrase\n", encoding="utf-8")
     analyzer = TitleAnalyzer(load_stopword_policy(tmp_path))
     assert analyzer.analyze_titles(["TESTPHRASE REMOVEPHRASE"]) == {"testphrase": 1}
+
+
+def test_unassigned_codepoint_token_is_dropped() -> None:
+    # CJK 区间含未分配码点，与汉字粘成一块时不可打印；hypothesis 偶发撞到，这里钉死。
+    analyzer = TitleAnalyzer(load_stopword_policy())
+    assert analyzer.analyze_titles(["一\U0002ebe1 原神"]) == {"原神": 1}
