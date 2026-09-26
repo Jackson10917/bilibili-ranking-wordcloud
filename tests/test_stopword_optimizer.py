@@ -183,3 +183,42 @@ def test_decisions_file_errors_are_actionable(tmp_path, capsys):
     assert optimize_stopwords(data, output)["manual_stopwords"] == 0
     # 保留词表优先，但不能静默：要告诉用户这条「停用」没生效。
     assert "ai" in capsys.readouterr().err
+
+
+def test_zero_byte_snapshot_is_skipped(tmp_path, capsys):
+    # 抓榜进程被强杀会留下 0 字节占位 CSV；每日任务会把它提交进仓库，不能让之后每天的分析都失败。
+    _snapshot(tmp_path / "ranking_20260101T000000Z.csv")
+    (tmp_path / "ranking_20260102T000000Z.csv").write_bytes(b"")
+    assert optimize_stopwords(tmp_path, tmp_path / "analysis")["snapshot_days"] == 1
+    assert "ranking_20260102T000000Z.csv" in capsys.readouterr().err
+
+
+def test_split_phrase_decision_warns(tmp_path, capsys):
+    # 「全网最强」会被切成 全网 + 最强，停用永远匹配不到；要提示，而不是静默计入人工停用词。
+    _snapshot(tmp_path / "ranking_20260101T000000Z.csv", "全网最强攻略")
+    output = tmp_path / "analysis"
+    output.mkdir()
+    (output / "stopword_decisions.csv").write_text("词,决定\n全网最强,停用\n", encoding="utf-8-sig")
+    optimize_stopwords(tmp_path, output)
+    assert "全网最强" in capsys.readouterr().err
+
+
+def test_locked_destination_leaves_outputs_untouched(tmp_path, monkeypatch):
+    # Windows 上 Excel 开着 CSV 时替换会失败；必须在动任何文件之前失败，不能留下半新半旧的结果。
+    _snapshot(tmp_path / "ranking_20260101T000000Z.csv")
+    output = tmp_path / "analysis"
+    optimize_stopwords(tmp_path, output)
+    before = {p: p.read_bytes() for p in output.rglob("*") if p.is_file()}
+    locked = output / "stopword_candidates.csv"
+    real_open = Path.open
+
+    def fake_open(self, mode="r", *args, **kwargs):
+        if self == locked and "a" in mode:
+            raise PermissionError("locked by Excel")
+        return real_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", fake_open)
+    _snapshot(tmp_path / "ranking_20260102T000000Z.csv", "全新标题")
+    with pytest.raises(PermissionError):
+        optimize_stopwords(tmp_path, output)
+    assert before == {p: p.read_bytes() for p in output.rglob("*") if p.is_file()}

@@ -144,7 +144,11 @@ def optimize_stopwords(
         seen: set[str] = set()
         with path.open(encoding="utf-8-sig", newline="") as stream:
             reader = csv.DictReader(stream)
-            if not {"视频标题", "BV号"}.issubset(reader.fieldnames or []):
+            # 0 字节是抓榜进程被强杀留下的占位文件，与只有表头的空榜单同样按缺席日跳过；
+            # 否则它随每日任务提交进仓库后，之后每天的分析都会失败。
+            if reader.fieldnames is not None and not {"视频标题", "BV号"}.issubset(
+                reader.fieldnames
+            ):
                 raise ValueError(f"榜单字段不完整：{path.name}")
             for row in reader:
                 title, bvid = row.get("视频标题"), row.get("BV号")
@@ -194,11 +198,19 @@ def optimize_stopwords(
             staging / "stopword_summary.json",
             json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
         )
-        for path in staging.rglob("*"):
-            if path.is_file():
-                destination = output_dir / path.relative_to(staging)
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(path, destination)
+        moves = [
+            (path, output_dir / path.relative_to(staging))
+            for path in staging.rglob("*")
+            if path.is_file()
+        ]
+        # 先确认每个目标都可写再动手：Windows 上 Excel 打开的 CSV 会让 os.replace 中途失败，
+        # 留下一半新一半旧的分析结果。ponytail: 检查与替换之间仍有竞态，只挡住常见的「文件开着」。
+        for _, destination in moves:
+            if destination.exists():
+                destination.open("ab").close()
+        for path, destination in moves:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(path, destination)
         for directory in (output_dir / "baseline", output_dir / "current"):
             expected = {f"word_frequency_{day}T000000Z.csv" for day in daily}
             expected.add("word_frequency_aggregate.csv")
@@ -248,6 +260,14 @@ def _export_analysis(
         ignored = "、".join(sorted(manual & allowlist))
         print(f"警告：这些词在内置保留词表里，「停用」不生效：{ignored}", file=sys.stderr)
     manual -= allowlist
+    # 被 jieba 切碎的短语（全网最强 → 全网 + 最强）永远匹配不到词元，停用会静默失效。
+    unmatched = manual - aggregate.keys()
+    if unmatched:
+        print(
+            f"警告：这些「停用」词从未作为单个词出现，没有效果（已被内置停用词过滤，或被分词"
+            f"切碎——可改标切开后的词，或加进内置词典 user_dict.txt）：{'、'.join(sorted(unmatched))}",
+            file=sys.stderr,
+        )
     rows: list[dict[str, Any]] = []
     automatic: set[str] = set()
     for word, total in aggregate.items():
