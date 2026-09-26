@@ -708,3 +708,19 @@ def test_failed_aggregate_render_removes_stale_png() -> None:
         with patch.object(cli_module, "render_wordcloud", fail):
             assert main(["--output-dir", directory, "--aggregate", "--no-fetch"]) == 0
         assert not (root / AGGREGATE_WORDCLOUD_PNG_NAME).exists()
+
+
+def test_trend_ties_share_rank(tmp_path: Path) -> None:
+    # 词频并列时名次曾按文件读入顺序排：两期词频完全相同的词被标成一升一降。
+    from bilibili_ranker.cli import _trend_rows
+
+    for day in range(1, 15):
+        body = "词,词频\n甲,1\n乙,1\n丙,2\n" if day <= 7 else "词,词频\n乙,1\n甲,1\n丙,2\n"
+        (tmp_path / f"word_frequency_202601{day:02d}T000000Z.csv").write_text(
+            body, encoding="utf-8-sig"
+        )
+    rows = {row["词"]: row for row in _trend_rows(tmp_path) or []}
+    assert rows["丙"]["本期排名"] == 1
+    for word in ("甲", "乙"):
+        assert (rows[word]["上期排名"], rows[word]["本期排名"]) == (2, 2)
+        assert rows[word]["状态"] == "持平"

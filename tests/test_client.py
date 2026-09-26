@@ -261,6 +261,8 @@ def test_session_keeps_transient_retry_config() -> None:
     assert isinstance(retries, Retry)
     assert retries.total == 2
     assert set(retries.status_forcelist or ()) == {429, 500, 502, 503, 504}
+    # Retry-After 原样睡没有上限，429 带一小时就会挂一小时。
+    assert retries.respect_retry_after_header is False
 
 
 def test_retries_on_200_with_invalid_json() -> None:
