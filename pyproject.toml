@@ -50,7 +50,7 @@ strict = true
 
 [[tool.mypy.overrides]]
 # 不发布类型存根的两个运行时依赖；jieba.lcut 的 Any 返回值由调用处 list() 包一层兜住。
-module = ["jieba", "wordcloud"]
+module = ["jieba", "jieba.*", "wordcloud"]
 ignore_missing_imports = true
 
 [tool.setuptools.packages.find]
