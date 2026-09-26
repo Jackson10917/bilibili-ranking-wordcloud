@@ -135,3 +135,17 @@ def test_multiword_noise_can_actually_be_learned(tmp_path):
         _snapshot(tmp_path / f"ranking_202601{day:02d}T000000Z.csv", "感谢观看 原神")
     result = optimize_stopwords(tmp_path, tmp_path / "analysis")
     assert result["automatic_words"] == ["感谢观看"]
+
+
+def test_header_only_snapshot_is_skipped_not_fatal(tmp_path, capsys):
+    # 抓榜整榜解析失败会故意留下只有表头的 CSV，不能让它卡死整次分析。
+    data = tmp_path / "data"
+    data.mkdir()
+    _snapshot(data / "ranking_20260101T000000Z.csv")
+    (data / "ranking_20260102T000000Z.csv").write_text("BV号,视频标题\n", encoding="utf-8-sig")
+    assert optimize_stopwords(data, tmp_path / "analysis")["snapshot_days"] == 1
+    assert "ranking_20260102T000000Z.csv" in capsys.readouterr().err
+    # 全部为空仍按错误退出。
+    (data / "ranking_20260101T000000Z.csv").write_text("BV号,视频标题\n", encoding="utf-8-sig")
+    with pytest.raises(ValueError):
+        optimize_stopwords(data, tmp_path / "analysis")

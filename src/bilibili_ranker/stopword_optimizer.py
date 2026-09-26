@@ -6,6 +6,7 @@ import csv
 import json
 import os
 import re
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -94,10 +95,15 @@ def optimize_stopwords(
                     if title not in samples[word] and len(samples[word]) < 3:
                         samples[word].append(title)
         if not seen:
-            raise ValueError(f"空榜单：{path.name}")
+            # 抓榜整榜解析失败时会故意留下只有表头的 CSV；当缺席日跳过并留痕，不让一天坏数据卡死分析。
+            # ponytail: 只看当天最新一份，同日较早的有效快照不回退补用；需要时按跳号倒序找第一份非空。
+            print(f"警告：空榜单，已跳过：{path.name}", file=sys.stderr)
+            continue
         daily[day] = dict(counts.most_common())
         days.update(counts.keys())
 
+    if not daily:
+        raise ValueError("没有可分析的非空榜单快照")
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     # 先在旁边生成完整结果；分词或暂存生成失败时保留上轮输出。
     with TemporaryDirectory(prefix=".stopword-", dir=output_dir.parent) as temporary:

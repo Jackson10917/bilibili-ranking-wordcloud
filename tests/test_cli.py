@@ -677,3 +677,34 @@ def test_offline_missing_history_removes_stale_derived_outputs(tmp_path):
         (tmp_path / name).write_bytes(b"stale")
     assert main(["--output-dir", str(tmp_path), "--no-fetch", "--aggregate", "--trend"]) == 0
     assert all(not (tmp_path / name).exists() for name in names)
+
+
+def test_global_output_dir_reaches_subcommand() -> None:
+    # 子命令默认值曾覆盖写在子命令前的 --output-dir，分析结果静默写进 output/。
+    from bilibili_ranker.cli import build_parser
+
+    parser = build_parser()
+    args = parser.parse_args(["--output-dir", "x", "stopword-analyze"])
+    assert args.output_dir == Path("x")
+    assert parser.parse_args(["stopword-analyze"]).output_dir == Path("output")
+
+
+def test_failed_aggregate_render_removes_stale_png() -> None:
+    # 累计词云是固定名：本次渲染失败时旧图不能留下冒充新累计结果。
+    from unittest.mock import patch
+
+    import bilibili_ranker.cli as cli_module
+    from bilibili_ranker.storage import AGGREGATE_WORDCLOUD_PNG_NAME
+
+    def fail(*_: object, **__: object) -> Path:
+        raise RuntimeError("no font")
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "word_frequency_20240101T000000Z.csv").write_text(
+            "词,词频\n魔方,2\n", encoding="utf-8-sig"
+        )
+        (root / AGGREGATE_WORDCLOUD_PNG_NAME).write_bytes(b"old")
+        with patch.object(cli_module, "render_wordcloud", fail):
+            assert main(["--output-dir", directory, "--aggregate", "--no-fetch"]) == 0
+        assert not (root / AGGREGATE_WORDCLOUD_PNG_NAME).exists()

@@ -223,7 +223,8 @@ class TitleAnalyzer:
         if token.rpartition(".")[2] in _FILE_EXTENSIONS:
             return None
         # 日文、西里尔按整块匹配，块内混着符号（・、҂），要求词元至少含一个字母。
-        if not any(character.isalpha() for character in token):
+        # CJK 区间含未分配码点（U+2EBE1 等），混进字母块时不可打印，不能进 CSV 和词云。
+        if not any(character.isalpha() for character in token) or not token.isprintable():
             return None
         if len(token) < self._minimum_token_length:
             return None

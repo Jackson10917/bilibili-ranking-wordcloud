@@ -20,8 +20,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Jackson10917/bilibili-ranking-wordcloud-code"
-Issues = "https://github.com/Jackson10917/bilibili-ranking-wordcloud-code/issues"
+Homepage = "https://github.com/Jackson10917/bilibili-ranking-wordcloud"
+Issues = "https://github.com/Jackson10917/bilibili-ranking-wordcloud/issues"
 
 [project.scripts]
 bilibili-rank = "bilibili_ranker.cli:main"
