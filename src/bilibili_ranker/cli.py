@@ -154,7 +154,8 @@ def build_parser() -> argparse.ArgumentParser:
         "stopword-analyze", aliases=["stopword-candidates"], help="分析历史并更新私有自动停用词表"
     )
     p_analyze.add_argument("--data-dir", type=Path, default=Path("data"))
-    p_analyze.add_argument("--output-dir", type=Path, default=Path("output"))
+    # SUPPRESS：子命令默认值会覆盖写在子命令前的全局 --output-dir，静默丢掉用户给的目录。
+    p_analyze.add_argument("--output-dir", type=Path, default=argparse.SUPPRESS)
     p_analyze.add_argument("--min-days", type=int, default=7)
     p_analyze.add_argument("--min-day-ratio", type=float, default=0.6)
     p_analyze.add_argument("--min-total", type=int, default=20)
@@ -308,6 +309,8 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
                 max_words=args.max_words,
             )
         except (RuntimeError, ValueError, OSError, MemoryError) as exc:
+            # 固定名的累计词云不能留旧图冒充本次结果。
+            cloud_destination.unlink(missing_ok=True)
             print(f"警告：词云生成失败，仅输出 CSV：{exc}", file=sys.stderr)
 
     return {
