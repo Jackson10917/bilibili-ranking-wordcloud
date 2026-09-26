@@ -85,7 +85,7 @@ python -m bilibili_ranker --output-dir output --no-fetch --aggregate --trend
 
 标题里有很多词出现得很频繁，却说明不了视频在讲什么，比如「完整版」「全网首发」「这种」「到底」，还有各种活动标签。这类词叫做**停用词**，统计时会被去掉，否则词云里全是它们。
 
-同时，程序会尽量保留游戏名、歌曲名等有意义的词。
+同时ranker会尽量保留游戏名、歌曲名等有意义的词。
 
 项目自带三份词表，放在 [resources/stopwords](src/bilibili_ranker/resources/stopwords/) 文件夹里：
 
@@ -104,7 +104,7 @@ python -m bilibili_ranker stopword-analyze --data-dir output --output-dir analys
 ```
 
 1. **程序推荐候选词。** 被很多不同 UP 主用过、出现在很多分区、连续好多天都有的词，会进入候选表 `analysis/stopword_candidates.csv`。
-2. **把握很大的词自动过滤。** 像「这种」「到底」这样本身没有实际意思的词，如果在各个分区都用得差不多、最近两周出现的次数也稳定，程序会直接把它过滤掉。
+2. **把握很大的词自动过滤。** 像「这种」「到底」这样本身没有实际意思的词，如果在各个分区都用得差不多、最近两周出现的次数也稳定，analysis会直接把它过滤掉。
 3. **其他的你来决定。** 打开候选表检查，把决定写进 `analysis/stopword_decisions.csv`（第一次运行时会自动创建）：
 
    ```csv
@@ -200,7 +200,7 @@ python -m bilibili_ranker --output-dir output --font-path /path/to/font.ttf
 - 网址、BV 号、表情符号和纯数字不参与统计。
 - 默认只统计两个字及以上的词，英文会统一转成小写。
 - 这个词可能在停用词表里。想让它出现，把它加进 `allowlist.txt`。
-- 如果是游戏名、人名被拆成了几段，用 `--user-dict` 告诉程序它是一个整体。
+- 如果是游戏名、人名被拆成了几段，用 `--user-dict` 告诉ranker它是一个整体。
 
 数据来自 [B站排行榜](https://www.bilibili.com/v/popular/rank/all)。B 站随时可能调整排行榜的返回内容和访问限制，使用时请遵守 B 站的相关规定。
 
