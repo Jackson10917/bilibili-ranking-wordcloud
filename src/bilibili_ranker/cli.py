@@ -74,6 +74,14 @@ _TREND_WINDOW = 7
 _TREND_MIN_COUNT = 2
 
 
+def _competition_ranks(counts: Mapping[str, int]) -> dict[str, int]:
+    """同词频同名次（1,2,2,4）；按位次排会让并列词随文件读入顺序凭空「上升/下降」。"""
+    first: dict[int, int] = {}
+    for position, count in enumerate(counts.values(), start=1):
+        first.setdefault(count, position)
+    return {word: first[count] for word, count in counts.items()}
+
+
 def _trend_rows(output_dir: Path) -> list[dict[str, Any]] | None:
     """近 7 个快照日 vs 前 7 个的词频排名变化；可对比的历史不足两期时返回 None。"""
 
@@ -97,10 +105,12 @@ def _trend_rows(output_dir: Path) -> list[dict[str, Any]] | None:
         for word, count in load_frequency_csvs(recent_paths).items()
         if count >= _TREND_MIN_COUNT
     }
-    # 排名就是词频降序的位次（load_frequency_csvs 已按降序返回）；并列词频按日期先后定序。
-    previous_rank = {word: rank for rank, word in enumerate(previous, start=1)}
+    # load_frequency_csvs 已按词频降序返回，行序沿用；名次按词频算，并列同名次。
+    previous_rank = _competition_ranks(previous)
+    recent_rank = _competition_ranks(recent)
     rows: list[dict[str, Any]] = []
-    for rank, (word, count) in enumerate(recent.items(), start=1):
+    for word, count in recent.items():
+        rank = recent_rank[word]
         old_rank = previous_rank.get(word)
         if old_rank is None:
             delta: Any = ""
@@ -120,13 +130,13 @@ def _trend_rows(output_dir: Path) -> list[dict[str, Any]] | None:
             }
         )
     # 掉出词垫底，沿用上期词频降序（previous 本身就是降序字典）；缺席侧的单元格留空。
-    for rank, (word, count) in enumerate(previous.items(), start=1):
+    for word, count in previous.items():
         if word not in recent:
             rows.append(
                 {
                     "词": word,
                     "状态": "掉出",
-                    "上期排名": rank,
+                    "上期排名": previous_rank[word],
                     "上期词频": count,
                     "本期排名": "",
                     "本期词频": "",

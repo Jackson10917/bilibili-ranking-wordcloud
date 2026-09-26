@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 import math
 import os
@@ -66,19 +67,23 @@ def read_decisions(path: Path) -> dict[str, str]:
         path.write_text("词,决定,备注\n", encoding="utf-8-sig")
         return {}
     decisions: dict[str, str] = {}
-    with path.open(encoding="utf-8-sig", newline="") as stream:
-        reader = csv.DictReader(stream)
-        if not {"词", "决定"}.issubset(reader.fieldnames or []):
-            raise ValueError(f"{path.name} 需要「词」「决定」两列")
-        for line, row in enumerate(reader, start=2):
-            word = normalize_token((row.get("词") or "").removeprefix("'"))
-            decision = (row.get("决定") or "").strip()
-            if not word or not decision:
-                continue
-            if decision not in (_STOP, _KEEP):
-                raise ValueError(f"{path.name} 第 {line} 行：决定只能填「停用」或「保留」")
-            if decisions.setdefault(word, decision) != decision:
-                raise ValueError(f"{path.name} 第 {line} 行：「{word}」的决定前后矛盾")
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError as exc:
+        # 中文 Windows 的 Excel「CSV（逗号分隔）」存成 GBK，报错要说清怎么改。
+        raise ValueError(f"{path.name} 不是 UTF-8 编码，请用 Excel 另存为「CSV UTF-8」") from exc
+    reader = csv.DictReader(io.StringIO(text, newline=""))
+    if not {"词", "决定"}.issubset(reader.fieldnames or []):
+        raise ValueError(f"{path.name} 需要「词」「决定」两列")
+    for line, row in enumerate(reader, start=2):
+        word = normalize_token((row.get("词") or "").removeprefix("'"))
+        decision = (row.get("决定") or "").strip()
+        if not word or not decision:
+            continue
+        if decision not in (_STOP, _KEEP):
+            raise ValueError(f"{path.name} 第 {line} 行：决定只能填「停用」或「保留」")
+        if decisions.setdefault(word, decision) != decision:
+            raise ValueError(f"{path.name} 第 {line} 行：「{word}」的决定前后矛盾")
     return decisions
 
 
@@ -237,8 +242,12 @@ def _export_analysis(
         write_trend_csv(baseline / "word_frequency_trend.csv", trend)
     trend_by_word = {row["词"]: row for row in trend or []}
 
-    # 保留词优先：人工「停用」也不压过内置保留词表。
-    manual = {word for word, decision in decisions.items() if decision == _STOP} - allowlist
+    # 保留词优先：人工「停用」也不压过内置保留词表，但要留痕，免得以为已经生效。
+    manual = {word for word, decision in decisions.items() if decision == _STOP}
+    if manual & allowlist:
+        ignored = "、".join(sorted(manual & allowlist))
+        print(f"警告：这些词在内置保留词表里，「停用」不生效：{ignored}", file=sys.stderr)
+    manual -= allowlist
     rows: list[dict[str, Any]] = []
     automatic: set[str] = set()
     for word, total in aggregate.items():

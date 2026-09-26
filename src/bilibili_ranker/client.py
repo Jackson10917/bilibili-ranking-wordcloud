@@ -59,6 +59,8 @@ def build_session() -> requests.Session:
             total=2,
             backoff_factor=0.5,
             status_forcelist=(429, 500, 502, 503, 504),
+            # urllib3 按 Retry-After 原样睡、没有上限，429 带一小时就挂一小时，远超 --timeout。
+            respect_retry_after_header=False,
         )
     )
     session.mount("https://", adapter)

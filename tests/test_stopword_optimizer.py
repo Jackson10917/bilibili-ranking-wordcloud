@@ -165,3 +165,21 @@ def test_header_only_snapshot_is_skipped_not_fatal(tmp_path, capsys):
     (data / "ranking_20260101T000000Z.csv").write_text("BV号,视频标题\n", encoding="utf-8-sig")
     with pytest.raises(ValueError):
         optimize_stopwords(data, tmp_path / "analysis")
+
+
+def test_decisions_file_errors_are_actionable(tmp_path, capsys):
+    data = tmp_path / "data"
+    data.mkdir()
+    _snapshot(data / "ranking_20260101T000000Z.csv")
+    output = tmp_path / "analysis"
+    decisions = output / "stopword_decisions.csv"
+    output.mkdir()
+    # 中文 Windows 的 Excel 默认把 CSV 存成 GBK：报错要点名文件和改法，而不是裸 UnicodeDecodeError。
+    decisions.write_bytes("词,决定\n可能,停用\n".encode("gbk"))
+    with pytest.raises(ValueError, match="CSV UTF-8"):
+        optimize_stopwords(data, output)
+    # 备注里带换行（Excel 单元格内换行）不能把后面的行切坏。
+    decisions.write_text('词,决定,备注\nai,停用,"第一行\n第二行"\n', encoding="utf-8-sig")
+    assert optimize_stopwords(data, output)["manual_stopwords"] == 0
+    # 保留词表优先，但不能静默：要告诉用户这条「停用」没生效。
+    assert "ai" in capsys.readouterr().err
