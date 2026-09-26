@@ -618,8 +618,8 @@ def test_cli_trend_compares_last_two_windows() -> None:
         for day in range(2, 16):
             body = previous if day <= 8 else recent
             snapshots[f"word_frequency_202401{day:02d}T000000Z.csv"] = f"词,词频\n{body}"
-        # 一闪词只在本期某一天出现过一次：窗内总词频 1，排名由并列组的读入顺序决定而非测量
-        # 得来，该被门槛剔掉。精确行集断言即覆盖它——它一旦出现说明门槛失效。
+        # 一闪词只在本期某一天出现过一次：窗内总词频 1，属于长尾噪声，该被门槛剔掉。
+        # 精确行集断言即覆盖它——它一旦出现说明门槛失效。
         snapshots["word_frequency_20240109T000000Z.csv"] = f"词,词频\n{recent}一闪词,1\n"
         for name, content in snapshots.items():
             (root / name).write_text(content, encoding="utf-8-sig")
