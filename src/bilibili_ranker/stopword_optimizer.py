@@ -72,7 +72,7 @@ def read_decisions(path: Path) -> dict[str, str]:
     except UnicodeDecodeError as exc:
         # 中文 Windows 的 Excel「CSV（逗号分隔）」存成 GBK，报错要说清怎么改。
         raise ValueError(f"{path.name} 不是 UTF-8 编码，请用 Excel 另存为「CSV UTF-8」") from exc
-    reader = csv.DictReader(io.StringIO(text, newline=""))
+    reader = csv.DictReader(io.StringIO(text, newline=""), strict=True)
     if not {"词", "决定"}.issubset(reader.fieldnames or []):
         raise ValueError(f"{path.name} 需要「词」「决定」两列")
     for line, row in enumerate(reader, start=2):
@@ -143,7 +143,7 @@ def optimize_stopwords(
         counts: Counter[str] = Counter()
         seen: set[str] = set()
         with path.open(encoding="utf-8-sig", newline="") as stream:
-            reader = csv.DictReader(stream)
+            reader = csv.DictReader(stream, strict=True)
             # 0 字节是抓榜进程被强杀留下的占位文件，与只有表头的空榜单同样按缺席日跳过；
             # 否则它随每日任务提交进仓库后，之后每天的分析都会失败。
             if reader.fieldnames is not None and not {"视频标题", "BV号"}.issubset(

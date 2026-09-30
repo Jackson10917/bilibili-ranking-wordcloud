@@ -173,7 +173,10 @@ def load_frequency_csvs(paths: Iterable[Path]) -> dict[str, int]:
         file_counts: Counter[str] = Counter()
         try:
             with path.open("r", encoding="utf-8-sig", newline="") as stream:
-                for row in csv.DictReader(stream):
+                reader = csv.DictReader(stream, strict=True)
+                if not set(FREQUENCY_CSV_HEADERS).issubset(reader.fieldnames or []):
+                    raise csv.Error("词频 CSV 需要「词」「词频」两列")
+                for row in reader:
                     word = (row.get("词") or "").removeprefix("'")
                     if not word:
                         continue
@@ -205,7 +208,7 @@ TREND_CSV_HEADERS = ("词", "状态", "上期排名", "上期词频", "本期排
 
 
 def write_trend_csv(destination: Path, rows: Iterable[Mapping[str, Any]]) -> Path:
-    """写出趋势行（build_trend 的产物）；词与状态同源于投稿标题，沿用公式前缀转义。"""
+    """写出趋势行（_trend_rows 的产物）；词与状态同源于投稿标题，沿用公式前缀转义。"""
 
     escaped = (
         {key: (_spreadsheet_safe(value) if key == "词" else value) for key, value in row.items()}
