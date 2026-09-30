@@ -196,8 +196,8 @@ def test_wordcloud_failure_keeps_csv_and_exits_zero() -> None:
 
 
 def test_empty_frequencies_still_writes_csv() -> None:
-    # 标题清洗后无词元（全是停用词/表情）时只输出榜单 CSV，退出码仍为 0；
-    # 词频 CSV 没有内容可写，不产出空表文件。
+    # 标题清洗后无词元（全是停用词/表情）时不生成词云，退出码仍为 0；
+    # 词频 CSV 仍保留表头，记录这次结果为空，不能让同日旧快照冒充最新结果。
     from unittest.mock import patch
 
     import bilibili_ranker.cli as cli_module
@@ -213,7 +213,45 @@ def test_empty_frequencies_still_writes_csv() -> None:
             assert main(["--output-dir", directory]) == 0
         assert len(list(Path(directory).glob("ranking_*.csv"))) == 1
         assert not list(Path(directory).glob("wordcloud_*.png"))
-        assert not list(Path(directory).glob("word_frequency_*.csv"))
+        frequency_files = list(Path(directory).glob("word_frequency_*.csv"))
+        assert len(frequency_files) == 1
+        with frequency_files[0].open(encoding="utf-8-sig", newline="") as stream:
+            reader = csv.DictReader(stream)
+            assert reader.fieldnames == ["词", "词频"]
+            assert list(reader) == []
+
+
+def test_empty_frequencies_replace_same_day_history(tmp_path: Path, monkeypatch) -> None:
+    import bilibili_ranker.cli as cli_module
+    from bilibili_ranker.client import RankingFetchResult
+    from bilibili_ranker.storage import (
+        AGGREGATE_FREQUENCY_CSV_NAME,
+        TREND_CSV_NAME,
+        load_frequency_csvs,
+        write_frequencies_csv,
+    )
+
+    for day in range(1, 8):
+        write_frequencies_csv(
+            tmp_path / f"word_frequency_202601{day:02d}T000000Z.csv", {"历史词": 2}
+        )
+    write_frequencies_csv(tmp_path / "word_frequency_20260108T000000Z.csv", {"旧词": 5})
+    fetched = RankingFetchResult(
+        fetched_at=datetime(2026, 1, 8, 1, tzinfo=timezone.utc),
+        items=({"bvid": "BV1aa0000000", "title": "🎉🎉🎉"},),
+    )
+    monkeypatch.setattr(cli_module, "fetch_all_ranking", lambda **_: fetched)
+    monkeypatch.setattr(cli_module, "render_wordcloud", lambda *args, **_: Path(args[1]))
+
+    assert main(["--output-dir", str(tmp_path), "--aggregate", "--trend"]) == 0
+    latest = cli_module._latest_frequency_paths(tmp_path)
+    assert len(latest) == 8
+    assert latest[-1].name == "word_frequency_20260108T010000Z.csv"
+    assert load_frequency_csvs([tmp_path / AGGREGATE_FREQUENCY_CSV_NAME]) == {"历史词": 14}
+    with (tmp_path / TREND_CSV_NAME).open(encoding="utf-8-sig", newline="") as stream:
+        rows = list(csv.DictReader(stream))
+    assert [row["词"] for row in rows] == ["历史词"]
+    assert rows[0]["本期词频"] == "12"
 
 
 def test_missing_resource_dir_exits_one() -> None:

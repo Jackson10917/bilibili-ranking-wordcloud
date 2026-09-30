@@ -75,7 +75,15 @@ def test_repeated_video_does_not_qualify(tmp_path):
     assert result["automatic_words"] == []
 
 
-@pytest.mark.parametrize("contents", ["bad,headers\n", "BV号,视频标题\n", "BV号,视频标题\na,\n"])
+@pytest.mark.parametrize(
+    "contents",
+    [
+        "bad,headers\n",
+        "BV号,视频标题\n",
+        "BV号,视频标题\na,\n",
+        'BV号,视频标题\nBV1,正常标题\nBV2,"未闭合标题\n',
+    ],
+)
 def test_bad_snapshot_does_not_replace_previous_outputs(tmp_path, contents):
     (tmp_path / "ranking_20260101T000000Z.csv").write_text(contents, encoding="utf-8")
     output = tmp_path / "analysis"
@@ -183,6 +191,9 @@ def test_decisions_file_errors_are_actionable(tmp_path, capsys):
     assert optimize_stopwords(data, output)["manual_stopwords"] == 0
     # 保留词表优先，但不能静默：要告诉用户这条「停用」没生效。
     assert "ai" in capsys.readouterr().err
+    decisions.write_text('词,决定,备注\n挑战,停用,"未闭合备注\n', encoding="utf-8-sig")
+    with pytest.raises(csv.Error):
+        optimize_stopwords(data, output)
 
 
 def test_zero_byte_snapshot_is_skipped(tmp_path, capsys):

@@ -291,9 +291,9 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             minimum_token_length=args.minimum_token_length,
         ).analyze(accepted)
 
-        if frequencies:
-            frequency_csv = write_frequencies_csv(bundle.word_frequency_csv, frequencies)
-        else:
+        # 空快照也要落盘：同日取最新时，它必须取代较早的非空结果。
+        frequency_csv = write_frequencies_csv(bundle.word_frequency_csv, frequencies)
+        if not frequencies:
             print("警告：标题清洗后没有可用词元，只输出 CSV。", file=sys.stderr)
 
         if not args.aggregate:

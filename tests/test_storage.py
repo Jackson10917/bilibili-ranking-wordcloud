@@ -270,13 +270,22 @@ def test_frequency_csv_write_read_roundtrip(word: str, count: int) -> None:
     assert loaded == {word: count}
 
 
-def test_corrupt_file_does_not_contribute_partial_counts(tmp_path):
+@pytest.mark.parametrize(
+    "contents",
+    [
+        "词,词频\n半截数据,7\n" + "x" * (csv.field_size_limit() + 1) + ",1\n",
+        '词,词频\n半截数据,7\n"未闭合字段,1\n',
+        "错误字段,词频\n半截数据,7\n",
+        "词,错误字段\n半截数据,7\n",
+    ],
+    ids=["oversized-field", "unclosed-quote", "missing-word-header", "missing-count-header"],
+)
+def test_corrupt_file_does_not_contribute_partial_counts(tmp_path, capsys, contents):
     from bilibili_ranker.storage import load_frequency_csvs
 
     bad = tmp_path / "bad.csv"
-    bad.write_text(
-        "词,词频\n半截数据,7\n" + "x" * (csv.field_size_limit() + 1) + ",1\n", encoding="utf-8"
-    )
+    bad.write_text(contents, encoding="utf-8")
     good = tmp_path / "good.csv"
     good.write_text("词,词频\n完整数据,3\n", encoding="utf-8")
     assert load_frequency_csvs([bad, good]) == {"完整数据": 3}
+    assert str(bad) in capsys.readouterr().err
