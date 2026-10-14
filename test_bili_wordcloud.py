@@ -58,7 +58,7 @@ def test_interaction_stopwords():
     assert bili.tokenize(interactions, stopwords, phrases) == []
 
 
-@pytest.mark.parametrize("prefix", ["=", "+", "-", "@"])
+@pytest.mark.parametrize("prefix", ["=", "+", "-", "@", "\t", "\r"])
 def test_snapshot_roundtrip(tmp_path, monkeypatch, prefix):
     clock = Mock(wraps=datetime)
     clock.now.return_value = datetime(2026, 10, 14, 16, 30, tzinfo=UTC).astimezone(
@@ -154,7 +154,15 @@ def test_fetch_cookies_retries_and_limit(tmp_path, monkeypatch, codes):
         {"code": code, "message": "测试", "data": {"list": [item()]}} for code in codes
     ]
     session.get.side_effect = [
-        Mock(json=Mock(return_value=payload)) for payload in payloads
+        Mock(
+            json=Mock(return_value=payload),
+            raise_for_status=Mock(
+                side_effect=bili.requests.HTTPError("HTTP 412")
+                if payload.get("code") == -352
+                else None
+            ),
+        )
+        for payload in payloads
     ]
     monkeypatch.setattr(bili.requests, "Session", lambda: session)
     sleep = Mock()

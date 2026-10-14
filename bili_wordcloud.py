@@ -70,7 +70,7 @@ def write_csv(path, headers, rows):
 
 
 def spreadsheet_safe(text):
-    return "'" + text if text.startswith(("=", "+", "-", "@")) else text
+    return "'" + text if text.startswith(("=", "+", "-", "@", "\t", "\r")) else text
 
 
 def write_snapshot(items, data):
@@ -134,7 +134,6 @@ def fetch(data):
                 params={"rid": 0, "type": "all"},
                 timeout=15,
             )
-            response.raise_for_status()
             payload = response.json()
             if payload["code"] == 0:
                 return write_snapshot(payload["data"]["list"], data)
