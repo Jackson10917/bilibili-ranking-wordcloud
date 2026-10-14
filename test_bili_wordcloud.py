@@ -2,7 +2,7 @@ import csv
 import subprocess
 import sys
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, Mock
 
@@ -61,9 +61,9 @@ def test_interaction_stopwords():
 @pytest.mark.parametrize("prefix", ["=", "+", "-", "@"])
 def test_snapshot_roundtrip(tmp_path, monkeypatch, prefix):
     clock = Mock(wraps=datetime)
-    clock.now.return_value = datetime(
-        2026, 10, 14, 16, 30, tzinfo=timezone.utc
-    ).astimezone(bili.BEIJING)
+    clock.now.return_value = datetime(2026, 10, 14, 16, 30, tzinfo=UTC).astimezone(
+        bili.BEIJING
+    )
     monkeypatch.setattr(bili, "datetime", clock)
     path = bili.write_snapshot([item(prefix + "世界")], tmp_path)
     assert path.name == "ranking_2026-10-15.csv"
