@@ -112,6 +112,15 @@ def test_snapshot_roundtrip(tmp_path, monkeypatch, prefix):
     assert bili.read_days(tmp_path, set(), []) == [[("测试UP", ["动画"])]]
 
 
+def test_csv_guard_applies_to_every_string_column(tmp_path):
+    path = tmp_path / "all-columns.csv"
+    cells = ["=SUM(1,2)", "\n=1+1", "  @SUM(1,2)", "＝1+1", "普通文本", "", -2, 3]
+    bili.write_csv(path, range(len(cells)), [cells])
+    with path.open(encoding="utf-8-sig", newline="") as stream:
+        row = list(csv.reader(stream))[1]
+    assert row == ["'" + value for value in cells[:4]] + ["普通文本", "", "-2", "3"]
+
+
 def test_auto_starts_on_day_14():
     day = [(f"up-{n}", ["到底", "到底"]) for n in range(5)]
     assert bili.auto_stopwords([day] * 13, set()) == set()

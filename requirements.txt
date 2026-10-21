@@ -1,4 +1,7 @@
 jieba>=0.42,<1
-requests>=2.31,<3
+requests>=2.34.2,<3
 stopwordsiso>=0.7,<1
 wordcloud>=1.9,<2
+certifi>=2026.10.18
+pillow>=13,<14
+urllib3>=2.8,<3

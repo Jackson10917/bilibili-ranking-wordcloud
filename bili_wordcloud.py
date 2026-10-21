@@ -66,11 +66,18 @@ def write_csv(path, headers, rows):
     with path.open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.writer(stream)
         writer.writerow(headers)
-        writer.writerows(rows)
+        writer.writerows(
+            [
+                spreadsheet_safe(value) if isinstance(value, str) else value
+                for value in row
+            ]
+            for row in rows
+        )
 
 
 def spreadsheet_safe(text):
-    return "'" + text if text.startswith(("=", "+", "-", "@", "\t", "\r")) else text
+    head = unicodedata.normalize("NFKC", text).lstrip(" ")
+    return "'" + text if head.startswith(tuple("=+-@\t\r\n")) else text
 
 
 def write_snapshot(items, data):
@@ -81,10 +88,10 @@ def write_snapshot(items, data):
                 rank,
                 item["bvid"],
                 f"https://www.bilibili.com/video/{item['bvid']}",
-                spreadsheet_safe(item["title"]),
-                spreadsheet_safe(item.get("tnamev2") or item["tname"]),
-                spreadsheet_safe(item.get("pid_name_v2", "")),
-                spreadsheet_safe(item["owner"]["name"]),
+                item["title"],
+                item.get("tnamev2") or item["tname"],
+                item.get("pid_name_v2", ""),
+                item["owner"]["name"],
                 datetime.fromtimestamp(item["pubdate"], BEIJING).strftime(
                     "%Y-%m-%d %H:%M:%S"
                 ),
