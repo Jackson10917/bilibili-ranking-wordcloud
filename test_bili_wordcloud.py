@@ -1,4 +1,5 @@
 import csv
+import json
 import subprocess
 import sys
 from collections import Counter
@@ -10,6 +11,8 @@ import pytest
 from PIL import Image
 
 import bili_wordcloud as bili
+
+NOW = datetime(2026, 10, 14, 16, 30, tzinfo=UTC).astimezone(bili.BEIJING)
 
 
 def item(title="世界 世界 动画 ＡＩ"):
@@ -59,13 +62,8 @@ def test_interaction_stopwords():
 
 
 @pytest.mark.parametrize("prefix", ["=", "+", "-", "@", "\t", "\r"])
-def test_snapshot_roundtrip(tmp_path, monkeypatch, prefix):
-    clock = Mock(wraps=datetime)
-    clock.now.return_value = datetime(2026, 10, 14, 16, 30, tzinfo=UTC).astimezone(
-        bili.BEIJING
-    )
-    monkeypatch.setattr(bili, "datetime", clock)
-    path = bili.write_snapshot([item(prefix + "世界")], tmp_path)
+def test_snapshot_roundtrip(tmp_path, prefix):
+    path = bili.write_snapshot([item(prefix + "世界")], tmp_path, NOW)
     assert path.name == "ranking_2026-10-15.csv"
     assert path.read_bytes().startswith(b"\xef\xbb\xbf")
     with path.open(encoding="utf-8-sig", newline="") as stream:
@@ -107,7 +105,7 @@ def test_snapshot_roundtrip(tmp_path, monkeypatch, prefix):
         "70",
     ]
     assert bili.read_days(tmp_path, set(), []) == [[("测试UP", ["世界"])]]
-    assert bili.write_snapshot([item("动画")], tmp_path) == path
+    assert bili.write_snapshot([item("动画")], tmp_path, NOW) == path
     assert len(list(tmp_path.glob("ranking_*.csv"))) == 1
     assert bili.read_days(tmp_path, set(), []) == [[("测试UP", ["动画"])]]
 
@@ -176,12 +174,20 @@ def test_fetch_cookies_retries_and_limit(tmp_path, monkeypatch, codes):
     monkeypatch.setattr(bili.requests, "Session", lambda: session)
     sleep = Mock()
     monkeypatch.setattr(bili.time, "sleep", sleep)
+    clock = Mock(wraps=datetime)
+    clock.now.return_value = NOW
+    monkeypatch.setattr(bili, "datetime", clock)
     if codes[-1] == 0:
-        assert bili.fetch(tmp_path).is_file()
+        assert bili.fetch(tmp_path) == tmp_path / "ranking_2026-10-15.csv"
+        raw = (tmp_path / "ranking_2026-10-15.json").read_text(encoding="utf-8")
+        assert json.loads(raw) == {
+            "fetched_at": "2026-10-15T00:30:00+08:00",
+            "response": payloads[-1],
+        }
     else:
         with pytest.raises(RuntimeError, match="code=-352"):
             bili.fetch(tmp_path)
-        assert not list(tmp_path.glob("*.csv"))
+        assert not list(tmp_path.iterdir())
     assert session.get.call_args_list[0].args == (
         "https://api.bilibili.com/x/frontend/finger/spi",
     )
@@ -208,7 +214,7 @@ def test_font_priority(monkeypatch):
 
 def test_report_cli(tmp_path):
     data, out = tmp_path / "data", tmp_path / "results"
-    bili.write_snapshot([item()], data)
+    bili.write_snapshot([item()], data, NOW)
     subprocess.run(
         [
             sys.executable,

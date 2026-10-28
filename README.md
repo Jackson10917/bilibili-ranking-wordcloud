@@ -34,7 +34,7 @@ python bili_wordcloud.py fetch
 python bili_wordcloud.py report
 ```
 
-原始榜单保存在 `data/ranking_YYYY-MM-DD.csv`，日期按北京时间算。结果保存在 `results/`：
+原始榜单保存在 `data/ranking_YYYY-MM-DD.csv`，日期按北京时间算。同一天还会保存 `data/ranking_YYYY-MM-DD.json`，里面是 B 站接口返回的完整数据和抓取时间 `fetched_at`。结果保存在 `results/`：
 
 | 文件 | 内容 |
 | --- | --- |
