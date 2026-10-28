@@ -1,5 +1,6 @@
 import argparse
 import csv
+import json
 import time
 import unicodedata
 from collections import Counter, defaultdict
@@ -80,7 +81,14 @@ def spreadsheet_safe(text):
     return "'" + text if head.startswith(tuple("=+-@\t\r\n")) else text
 
 
-def write_snapshot(items, data):
+def write_raw(payload, data, now):
+    path = data / f"ranking_{now:%Y-%m-%d}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    raw = {"fetched_at": now.isoformat(timespec="seconds"), "response": payload}
+    path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+
+
+def write_snapshot(items, data, now):
     rows = []
     for rank, item in enumerate(items, 1):
         rows.append(
@@ -110,7 +118,7 @@ def write_snapshot(items, data):
                 ),
             ]
         )
-    path = data / f"ranking_{datetime.now(BEIJING):%Y-%m-%d}.csv"
+    path = data / f"ranking_{now:%Y-%m-%d}.csv"
     write_csv(path, RANKING_HEADERS, rows)
     return path
 
@@ -143,7 +151,9 @@ def fetch(data):
             )
             payload = response.json()
             if payload["code"] == 0:
-                return write_snapshot(payload["data"]["list"], data)
+                now = datetime.now(BEIJING)
+                write_raw(payload, data, now)
+                return write_snapshot(payload["data"]["list"], data, now)
             if attempt < 2:
                 time.sleep(1)
         raise RuntimeError(f"B站返回 code={payload['code']}：{payload.get('message')}")
