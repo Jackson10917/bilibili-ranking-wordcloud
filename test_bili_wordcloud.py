@@ -51,14 +51,12 @@ def test_remove_phrases():
     assert bili.tokenize("制作 世界", stopwords, phrases) == ["制作", "世界"]
 
 
-def test_interaction_stopwords():
+def test_manual_stopwords_stay_whole():
     stopwords, _, phrases = bili.load_words()
-    interactions = (
-        "一键三连 求三连 三连 求点赞 求关注 求收藏 求投币 点个赞 点赞三连 "
-        "下期再见 敬请期待 不见不散 持续更新 点赞关注 感谢观看"
-    )
-    assert set(interactions.split()) <= stopwords
-    assert bili.tokenize(interactions, stopwords, phrases) == []
+    manual = bili.read_words("stopwords.txt")
+    assert [word for word in manual if bili.jieba.lcut(word) != [word]] == []
+    title = "一键三连 求点赞三连 哔哩哔哩 持续更新中 三连胜"
+    assert bili.tokenize(title, stopwords, phrases) == ["三连胜"]
 
 
 @pytest.mark.parametrize("prefix", ["=", "+", "-", "@", "\t", "\r"])
