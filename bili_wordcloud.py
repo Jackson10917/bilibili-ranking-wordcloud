@@ -55,9 +55,12 @@ def read_words(name):
 def load_words():
     jieba.setLogLevel("ERROR")
     jieba.load_userdict(str(WORDS / "userdict.txt"))
+    manual = read_words("stopwords.txt")
+    for word in manual:
+        jieba.add_word(word)
     keep = read_words("keep.txt")
     stopwords = {normalize(word) for word in iso_stopwords(["zh", "en"])}
-    stopwords = (stopwords | read_words("stopwords.txt")) - keep
+    stopwords = (stopwords | manual) - keep
     phrases = sorted(read_words("phrases.txt"), key=lambda word: (-len(word), word))
     return stopwords, keep, phrases
 
