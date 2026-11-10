@@ -20,6 +20,15 @@ FONT_PATHS = (
     "C:/Windows/Fonts/msyh.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
 )
+STAT_COLUMNS = {
+    "view": "播放量",
+    "danmaku": "弹幕数",
+    "reply": "评论数",
+    "favorite": "收藏数",
+    "coin": "投币数",
+    "share": "分享数",
+    "like": "点赞数",
+}
 RANKING_HEADERS = (
     "排名",
     "BV号",
@@ -30,14 +39,18 @@ RANKING_HEADERS = (
     "UP主",
     "发布时间（北京时间）",
     "视频时长（秒）",
-    "播放量",
-    "弹幕数",
-    "评论数",
-    "收藏数",
-    "投币数",
-    "分享数",
-    "点赞数",
+    *STAT_COLUMNS.values(),
 )
+REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/140.0.0.0 Safari/537.36"
+    ),
+    "Referer": "https://www.bilibili.com/v/popular/rank/all",
+    "Accept": "application/json, text/plain, */*",
+}
+FUNCTION_WORD_FLAGS = {"r", "d", "c", "p", "u", "y", "e", "o", "q"}
 
 
 def normalize(text):
@@ -59,10 +72,16 @@ def load_words():
     for word in manual:
         jieba.add_word(word)
     keep = read_words("keep.txt")
-    stopwords = {normalize(word) for word in iso_stopwords(["zh", "en"])}
-    stopwords = (stopwords | manual) - keep
+    common = {normalize(word) for word in iso_stopwords(["zh", "en"])}
     phrases = sorted(read_words("phrases.txt"), key=lambda word: (-len(word), word))
-    return stopwords, keep, phrases
+    return (common | manual) - keep, keep, phrases
+
+
+def spreadsheet_safe(value):
+    if not isinstance(value, str):
+        return value
+    head = unicodedata.normalize("NFKC", value).lstrip(" ")
+    return "'" + value if head.startswith(tuple("=+-@\t\r\n")) else value
 
 
 def write_csv(path, headers, rows):
@@ -70,18 +89,7 @@ def write_csv(path, headers, rows):
     with path.open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.writer(stream)
         writer.writerow(headers)
-        writer.writerows(
-            [
-                spreadsheet_safe(value) if isinstance(value, str) else value
-                for value in row
-            ]
-            for row in rows
-        )
-
-
-def spreadsheet_safe(text):
-    head = unicodedata.normalize("NFKC", text).lstrip(" ")
-    return "'" + text if head.startswith(tuple("=+-@\t\r\n")) else text
+        writer.writerows([spreadsheet_safe(value) for value in row] for row in rows)
 
 
 def write_raw(payload, data, now):
@@ -92,35 +100,21 @@ def write_raw(payload, data, now):
 
 
 def write_snapshot(items, data, now):
-    rows = []
-    for rank, item in enumerate(items, 1):
-        rows.append(
-            [
-                rank,
-                item["bvid"],
-                f"https://www.bilibili.com/video/{item['bvid']}",
-                item["title"],
-                item.get("tnamev2") or item["tname"],
-                item.get("pid_name_v2", ""),
-                item["owner"]["name"],
-                datetime.fromtimestamp(item["pubdate"], BEIJING).strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                ),
-                item["duration"],
-                *(
-                    item["stat"].get(key)
-                    for key in (
-                        "view",
-                        "danmaku",
-                        "reply",
-                        "favorite",
-                        "coin",
-                        "share",
-                        "like",
-                    )
-                ),
-            ]
-        )
+    rows = [
+        [
+            rank,
+            item["bvid"],
+            f"https://www.bilibili.com/video/{item['bvid']}",
+            item["title"],
+            item.get("tnamev2") or item["tname"],
+            item.get("pid_name_v2", ""),
+            item["owner"]["name"],
+            f"{datetime.fromtimestamp(item['pubdate'], BEIJING):%Y-%m-%d %H:%M:%S}",
+            item["duration"],
+            *(item["stat"].get(key) for key in STAT_COLUMNS),
+        ]
+        for rank, item in enumerate(items, 1)
+    ]
     path = data / f"ranking_{now:%Y-%m-%d}.csv"
     write_csv(path, RANKING_HEADERS, rows)
     return path
@@ -128,17 +122,7 @@ def write_snapshot(items, data, now):
 
 def fetch(data):
     with requests.Session() as session:
-        session.headers.update(
-            {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/140.0.0.0 Safari/537.36"
-                ),
-                "Referer": "https://www.bilibili.com/v/popular/rank/all",
-                "Accept": "application/json, text/plain, */*",
-            }
-        )
+        session.headers.update(REQUEST_HEADERS)
         response = session.get(
             "https://api.bilibili.com/x/frontend/finger/spi", timeout=15
         )
@@ -147,18 +131,17 @@ def fetch(data):
         session.cookies.set("buvid3", cookies["b_3"], domain=".bilibili.com")
         session.cookies.set("buvid4", cookies["b_4"], domain=".bilibili.com")
         for attempt in range(3):
-            response = session.get(
+            if attempt:
+                time.sleep(1)
+            payload = session.get(
                 "https://api.bilibili.com/x/web-interface/ranking/v2",
                 params={"rid": 0, "type": "all"},
                 timeout=15,
-            )
-            payload = response.json()
+            ).json()
             if payload["code"] == 0:
                 now = datetime.now(BEIJING)
                 write_raw(payload, data, now)
                 return write_snapshot(payload["data"]["list"], data, now)
-            if attempt < 2:
-                time.sleep(1)
         raise RuntimeError(f"B站返回 code={payload['code']}：{payload.get('message')}")
 
 
@@ -179,15 +162,14 @@ def read_days(data, stopwords, phrases):
     days = []
     for path in sorted(data.glob("ranking_*.csv")):
         with path.open(encoding="utf-8-sig", newline="") as stream:
-            days.append(
-                [
-                    (
-                        row["UP主"] or row["BV号"],
-                        tokenize(row["视频标题"], stopwords, phrases),
-                    )
-                    for row in csv.DictReader(stream)
-                ]
-            )
+            day = [
+                (
+                    row["UP主"] or row["BV号"],
+                    tokenize(row["视频标题"], stopwords, phrases),
+                )
+                for row in csv.DictReader(stream)
+            ]
+        days.append(day)
     return days
 
 
@@ -202,24 +184,33 @@ def auto_stopwords(days, keep):
         window = days[max(0, end - 28) : end]
         present, uploaders = Counter(), defaultdict(set)
         for day in window:
-            present.update({word for _, words in day for word in words})
+            daily_words = set()
             for uploader, words in day:
-                for word in set(words):
+                for word in words:
+                    daily_words.add(word)
                     uploaders[word].add(uploader)
+            present.update(daily_words)
         current = {word for word in current if present[word] / len(window) >= 0.25}
         current.update(
             word
             for word, count in present.items()
             if count / len(window) >= 0.5
             and len(uploaders[word]) >= 5
-            and pos_flags(word) <= {"r", "d", "c", "p", "u", "y", "e", "o", "q"}
+            and pos_flags(word) <= FUNCTION_WORD_FLAGS
         )
     return current - keep
 
 
+def sum_counts(counts):
+    total = Counter()
+    for count in counts:
+        total.update(count)
+    return total
+
+
 def trend_rows(counts):
-    previous = sum(counts[-14:-7], Counter())
-    recent = sum(counts[-7:], Counter())
+    previous = sum_counts(counts[-14:-7])
+    recent = sum_counts(counts[-7:])
     rows = [
         (word, previous[word], recent[word], recent[word] - previous[word])
         for word in previous.keys() | recent.keys()
@@ -241,7 +232,7 @@ def report(data, out, font=None):
         for day in days
     ]
     total = dict(
-        sorted(sum(counts, Counter()).items(), key=lambda item: (-item[1], item[0]))
+        sorted(sum_counts(counts).items(), key=lambda item: (-item[1], item[0]))
     )
     write_csv(out / "word_frequency.csv", ("词", "次数"), total.items())
     write_csv(out / "trend.csv", ("词", "上周", "本周", "变化"), trend_rows(counts))
@@ -262,9 +253,9 @@ def main():
     parser = argparse.ArgumentParser(description="抓取B站排行榜并生成词云")
     commands = parser.add_subparsers(dest="command", required=True)
     fetch_parser = commands.add_parser("fetch", help="抓取当天榜单")
-    fetch_parser.add_argument("--data", type=Path, default=Path("data"))
     report_parser = commands.add_parser("report", help="生成累计词频、趋势和词云")
-    report_parser.add_argument("--data", type=Path, default=Path("data"))
+    for command in (fetch_parser, report_parser):
+        command.add_argument("--data", type=Path, default=Path("data"))
     report_parser.add_argument("--out", type=Path, default=Path("results"))
     report_parser.add_argument("--font", type=Path)
     args = parser.parse_args()
