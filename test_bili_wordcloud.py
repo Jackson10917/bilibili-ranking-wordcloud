@@ -117,11 +117,50 @@ def test_csv_guard_applies_to_every_string_column(tmp_path):
     assert row == ["'" + value for value in cells[:4]] + ["普通文本", "", "-2", "3"]
 
 
+@pytest.mark.parametrize("subcategory", [None, ""])
+def test_snapshot_optional_fields(tmp_path, subcategory):
+    video = item()
+    del video["tnamev2"]
+    del video["pid_name_v2"]
+    if subcategory is not None:
+        video["tnamev2"] = subcategory
+    video["stat"] = {"view": 0, "like": 7}
+    path = bili.write_snapshot([video], tmp_path, NOW)
+    with path.open(encoding="utf-8-sig", newline="") as stream:
+        row = next(csv.DictReader(stream))
+    assert row["视频分区"] == "旧分区"
+    assert row["主分区"] == ""
+    assert [row[column] for column in bili.RANKING_HEADERS[9:]] == [
+        "0",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "7",
+    ]
+
+
+def test_read_days_orders_legacy_snapshots_and_falls_back_to_bvid(tmp_path):
+    headers = "BV号,UP主,视频标题\n"
+    (tmp_path / "ranking_2026-10-03.csv").write_text(
+        headers + "BV2,测试UP,动画\n", encoding="utf-8"
+    )
+    (tmp_path / "ranking_2026-10-01.csv").write_text(
+        headers + "BV1,,世界 世界\n", encoding="utf-8-sig"
+    )
+    assert bili.read_days(tmp_path, set(), []) == [
+        [("BV1", ["世界", "世界"])],
+        [("测试UP", ["动画"])],
+    ]
+
+
 def test_auto_starts_on_day_14():
     day = [(f"up-{n}", ["到底", "到底"]) for n in range(5)]
     assert bili.auto_stopwords([day] * 13, set()) == set()
     assert bili.auto_stopwords([day] * 14, set()) == {"到底"}
     assert bili.auto_stopwords([day[:4]] * 14, set()) == set()
+    assert bili.auto_stopwords([day[:4] * 2] * 14, set()) == set()
 
 
 def test_auto_retains_at_quarter_and_recovers_below():
@@ -141,13 +180,25 @@ def test_auto_keep_and_pos():
 
 def test_trend_counts_and_bounded_windows():
     old = [Counter({"旧历史": 100})] * 7
-    previous = [Counter({"增加": 1, "减少": 2, "零星": 1})] + [Counter()] * 6
-    recent = [Counter({"增加": 3, "新增": 2, "零星": 1})] + [Counter()] * 6
-    assert bili.trend_rows(old + previous + recent) == [
+    previous = [Counter({"增加": 1, "减少": 2}), Counter({"零星": 1})] + [Counter()] * 5
+    recent = [Counter({"增加": 3, "新增": 2}), Counter({"零星": 1})] + [Counter()] * 5
+    counts = old + previous + recent
+    original = [count.copy() for count in counts]
+    assert bili.trend_rows(counts) == [
         ("增加", 1, 3, 2),
         ("新增", 0, 2, 2),
         ("减少", 2, 0, -2),
     ]
+    assert counts == original
+
+
+@pytest.mark.parametrize("days", [0, 1, 7, 8, 14, 15])
+def test_trend_partial_windows(days):
+    counts = [Counter({"世界": 2}) for _ in range(days)]
+    previous = min(max(days - 7, 0), 7) * 2
+    recent = min(days, 7) * 2
+    expected = [("世界", previous, recent, recent - previous)] if days else []
+    assert bili.trend_rows(counts) == expected
 
 
 @pytest.mark.parametrize("codes", [(-352, 0), (-352, -352, -352)])
