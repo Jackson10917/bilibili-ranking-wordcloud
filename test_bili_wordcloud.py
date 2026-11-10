@@ -180,8 +180,8 @@ def test_auto_keep_and_pos():
 
 def test_trend_counts_and_bounded_windows():
     old = [Counter({"旧历史": 100})] * 7
-    previous = [Counter({"增加": 1, "减少": 2, "零星": 1})] + [Counter()] * 6
-    recent = [Counter({"增加": 3, "新增": 2, "零星": 1})] + [Counter()] * 6
+    previous = [Counter({"增加": 1, "减少": 2}), Counter({"零星": 1})] + [Counter()] * 5
+    recent = [Counter({"增加": 3, "新增": 2}), Counter({"零星": 1})] + [Counter()] * 5
     counts = old + previous + recent
     original = [count.copy() for count in counts]
     assert bili.trend_rows(counts) == [
